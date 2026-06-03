@@ -1,0 +1,15 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+.vite
+
+# local Claude settings (machine-specific permissions)
+.claude/settings.local.json
+
+# imported SCORM samples placed at the repo root (user data, not part of the app)
+/*.zip
+
+# docker image exports
+*.tar

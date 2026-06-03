@@ -1,0 +1,187 @@
+import { useRef, useState } from 'react';
+import { Icon } from '@/components/Icon';
+import { Modal, ModalHead } from './Modal';
+import { Toggle } from '@/components/ui/Toggle';
+import { useCourse } from '@/store/courseStore';
+import { useUi } from '@/store/uiStore';
+import { usePreview } from '@/store/previewStore';
+import { buildScormPackage, downloadBlob, type ExportResult } from '@/scorm/export';
+import type { ScormVersion } from '@/types/course';
+
+type Phase = 'config' | 'building' | 'done' | 'error';
+type Mode = 'blocks' | 'original';
+
+const MODE_OPTIONS: Array<{ id: Mode; label: string; desc: string }> = [
+  {
+    id: 'original',
+    label: 'Faithful copy — original look (recommended)',
+    desc: 'Keeps the original design, layout, images, audio and narration. For Lectora courses your deleted pages are removed by rewiring the course navigation (neighbors re-pointed, table of contents and page counts updated) — so the trimmed course still looks and works like the original. Reordering isn’t applied. Other authoring tools: the whole course is kept as-is.',
+  },
+  {
+    id: 'blocks',
+    label: 'Rebuilt — clean simplified course',
+    desc: 'Generates a brand-new, LMS-ready course from your edited slides (deletions and reordering applied) with recovered text plus extracted media. A plain, simplified layout — it will NOT look like the original design.',
+  },
+];
+
+const OPTION_ROWS: Array<['manifest' | 'minify' | 'includeSource', string]> = [
+  ['manifest', 'Regenerate imsmanifest.xml'],
+  ['minify', 'Minify HTML & assets'],
+  ['includeSource', 'Include editable source files'],
+];
+
+export function ExportModal() {
+  const course = useCourse((s) => s.course);
+  const setModal = useUi((s) => s.setModal);
+  const flash = useUi((s) => s.flash);
+  const originalFile = usePreview((s) => s.file);
+  const close = () => setModal(null);
+
+  const hasOriginal = !!originalFile;
+  const [mode, setMode] = useState<Mode>(hasOriginal ? 'original' : 'blocks');
+  const [version, setVersion] = useState<ScormVersion>(course.meta.scormVersion);
+  const [name, setName] = useState(course.meta.package.replace(/\.zip$/, ''));
+  const [opts, setOpts] = useState({ minify: true, includeSource: false, manifest: true });
+  const [phase, setPhase] = useState<Phase>('config');
+  const [error, setError] = useState<string>('');
+  const resultRef = useRef<ExportResult | null>(null);
+
+  // Original-passthrough keeps the source package's SCORM version.
+  const effectiveVersion: ScormVersion = mode === 'original' ? course.meta.scormVersion : version;
+
+  // pages present at import that the editor has since removed
+  const removedPages = (() => {
+    const kept = new Set(course.slides.map((s) => s.sourceHref).filter(Boolean));
+    return usePreview.getState().importedPages.filter((p) => !kept.has(p));
+  })();
+
+  const build = async () => {
+    setPhase('building');
+    setError('');
+    try {
+      const result = await buildScormPackage(course, { name, version: effectiveVersion, mode, ...opts }, originalFile, removedPages);
+      resultRef.current = result;
+      setPhase('done');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Packaging failed.');
+      setPhase('error');
+    }
+  };
+
+  const download = () => {
+    if (resultRef.current) {
+      downloadBlob(resultRef.current.blob, resultRef.current.filename);
+      flash('Package downloaded');
+    }
+    close();
+  };
+
+  return (
+    <Modal onClose={close} width={540} label="Export SCORM">
+      <ModalHead icon="download" title="Export SCORM package" sub="Re-package your edits into a fresh LMS-ready .zip." onClose={close} />
+
+      {phase === 'config' && (
+        <div style={{ padding: 22 }}>
+          {hasOriginal && (
+            <div style={{ marginBottom: 16 }}>
+              <label className="field-label">What to export</label>
+              <select className="field" value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
+                {MODE_OPTIONS.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6, lineHeight: 1.45 }}>{MODE_OPTIONS.find((o) => o.id === mode)?.desc}</div>
+            </div>
+          )}
+
+          <div style={{ marginBottom: 16 }}>
+            <label className="field-label">Package name</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+              <input className="field" value={name} onChange={(e) => setName(e.target.value)} style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }} />
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--ink-3)', padding: '9px 12px', border: '1px solid var(--line)', borderLeft: 'none', borderRadius: '0 var(--r-md) var(--r-md) 0', background: 'var(--surface-sunk)' }}>.zip</span>
+            </div>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label className="field-label">SCORM version{mode === 'original' ? ' (kept from source)' : ''}</label>
+            <div className="seg" style={{ width: '100%', opacity: mode === 'original' ? 0.55 : 1 }}>
+              {([['1.2', 'SCORM 1.2'], ['2004', 'SCORM 2004']] as const).map(([v, lbl]) => (
+                <button key={v} className={effectiveVersion === v ? 'on' : ''} style={{ flex: 1, justifyContent: 'center' }} disabled={mode === 'original'} onClick={() => setVersion(v)}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="field-label">Options</label>
+          <div className="card" style={{ padding: '4px 14px', marginBottom: 18 }}>
+            {OPTION_ROWS.filter(([k]) => k !== 'manifest').map(([k, lbl], i, arr) => (
+              <div key={k} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--line)' : 'none' }}>
+                <span style={{ fontSize: 13.5 }}>{lbl}</span>
+                <Toggle on={opts[k]} onChange={() => setOpts((o) => ({ ...o, [k]: !o[k] }))} />
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <button className="btn btn-ghost" onClick={close}>
+              Cancel
+            </button>
+            <button className="btn btn-primary" onClick={build} disabled={!name.trim()}>
+              <Icon name="download" size={16} /> Build package
+            </button>
+          </div>
+        </div>
+      )}
+
+      {phase === 'building' && (
+        <div style={{ padding: '48px 22px', textAlign: 'center' }}>
+          <div className="spin" style={{ width: 46, height: 46, margin: '0 auto 18px', color: 'var(--accent)' }}>
+            <Icon name="refresh" size={46} />
+          </div>
+          <div style={{ fontSize: 15.5, fontWeight: 700 }}>Building {name}.zip…</div>
+          <div style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4 }}>
+            {mode === 'original' ? 'Re-packaging the original course with all assets' : `Packaging ${course.slides.length} slides with media`} · SCORM {effectiveVersion}
+          </div>
+        </div>
+      )}
+
+      {phase === 'done' && (
+        <div style={{ padding: '40px 28px', textAlign: 'center' }}>
+          <div style={{ width: 56, height: 56, borderRadius: 99, background: 'var(--green-soft)', color: 'var(--green)', display: 'grid', placeItems: 'center', margin: '0 auto 16px' }}>
+            <Icon name="check" size={30} stroke={3} />
+          </div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700 }}>Package ready</div>
+          <div style={{ fontSize: 13.5, color: 'var(--ink-2)', margin: '6px 0 20px' }}>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>{resultRef.current?.filename}</span> · {resultRef.current?.size} · SCORM {effectiveVersion}
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+            <button className="btn btn-soft" onClick={close}>
+              Close
+            </button>
+            <button className="btn btn-primary" onClick={download}>
+              <Icon name="download" size={16} /> Download .zip
+            </button>
+          </div>
+        </div>
+      )}
+
+      {phase === 'error' && (
+        <div style={{ padding: '40px 28px', textAlign: 'center' }}>
+          <div style={{ width: 56, height: 56, borderRadius: 99, background: 'var(--rose-soft)', color: 'var(--rose)', display: 'grid', placeItems: 'center', margin: '0 auto 16px' }}>
+            <Icon name="warning" size={28} />
+          </div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700 }}>Export failed</div>
+          <div style={{ fontSize: 13.5, color: 'var(--ink-2)', margin: '6px 0 20px' }}>{error}</div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+            <button className="btn btn-soft" onClick={close}>
+              Close
+            </button>
+            <button className="btn btn-primary" onClick={() => setPhase('config')}>
+              Back
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}

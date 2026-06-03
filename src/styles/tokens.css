@@ -1,0 +1,81 @@
+/* ============================================================
+   SCORM Editor — design tokens (ported verbatim from the
+   design_reference prototype's styles.css).
+   Accent / font / density values are injected at runtime as
+   inline CSS variables on the root by the prefs store; the
+   defaults below mirror the prototype.
+   ============================================================ */
+
+:root {
+  /* fonts (overridable via Settings) */
+  --font-display: 'Bricolage Grotesque', 'Hanken Grotesk', sans-serif;
+  --font-ui: 'Hanken Grotesk', sans-serif;
+  --font-mono: 'Space Mono', monospace;
+
+  /* accent (overridable via Settings — default Violet) */
+  --accent: #6d4ee0;
+  --accent-press: #5a3dc8;
+  --accent-soft: #efe9ff;
+  --accent-ink: #4a2fb0;
+
+  /* warm neutrals — light theme */
+  --paper: #f5f1ea;
+  --surface: #ffffff;
+  --surface-2: #faf7f2;
+  --surface-sunk: #f0ebe2;
+  --ink: #2a2620;
+  --ink-2: #5c554b;
+  --ink-3: #8c8377;
+  --line: #e7e0d5;
+  --line-strong: #d8cfc0;
+
+  /* semantic */
+  --green: #2f9e63;
+  --green-soft: #e3f4ea;
+  --amber: #d98a2b;
+  --amber-soft: #fbeed8;
+  --rose: #d6504e;
+  --rose-soft: #fbe6e5;
+  --blue: #2f7fd9;
+  --blue-soft: #e3eefb;
+
+  /* shape */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+
+  /* shadow */
+  --sh-sm: 0 1px 2px rgba(42, 38, 32, .06), 0 1px 3px rgba(42, 38, 32, .05);
+  --sh-md: 0 2px 6px rgba(42, 38, 32, .06), 0 6px 18px rgba(42, 38, 32, .08);
+  --sh-lg: 0 8px 24px rgba(42, 38, 32, .12), 0 24px 60px rgba(42, 38, 32, .14);
+  --sh-pop: 0 10px 40px rgba(42, 38, 32, .18);
+
+  /* density (overridable) */
+  --density: 1;
+
+  --topbar-h: 60px;
+  --rail-w: 296px;
+  --inspector-w: 324px;
+}
+
+[data-theme='dark'] {
+  --paper: #1a1814;
+  --surface: #242019;
+  --surface-2: #2b261e;
+  --surface-sunk: #1f1c16;
+  --ink: #f3ede2;
+  --ink-2: #c2b9a9;
+  --ink-3: #8f8676;
+  --line: #38322a;
+  --line-strong: #463f34;
+  --accent-soft: #2e2552;
+  --green-soft: #1d3528;
+  --amber-soft: #3a2e16;
+  --rose-soft: #3a201f;
+  --blue-soft: #16293e;
+  --sh-sm: 0 1px 2px rgba(0, 0, 0, .3);
+  --sh-md: 0 2px 8px rgba(0, 0, 0, .35), 0 8px 22px rgba(0, 0, 0, .4);
+  --sh-lg: 0 10px 30px rgba(0, 0, 0, .5), 0 24px 60px rgba(0, 0, 0, .55);
+  --sh-pop: 0 12px 44px rgba(0, 0, 0, .6);
+}

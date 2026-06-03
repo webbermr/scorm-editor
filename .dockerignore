@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.gitignore
+.claude
+.DS_Store
+**/.DS_Store
+*.zip
+design_handoff_scorm_editor
+Dockerfile
+.dockerignore
+docker-compose.yml
+README.md
+npm-debug.log*

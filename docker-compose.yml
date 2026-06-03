@@ -1,0 +1,8 @@
+services:
+  scorm-editor:
+    build: .
+    image: scorm-editor:latest
+    container_name: scorm-editor
+    ports:
+      - "8081:80"
+    restart: unless-stopped
