@@ -49,24 +49,50 @@ const EDIT_STYLE = `
   [data-se-edited] { outline: 1px dashed rgba(43,138,62,.7) !important; outline-offset: 2px; }
 `;
 
-/** Set an element's visible text while preserving its first styled run (span/font).
- *  Typed line breaks are kept in the text node and rendered via white-space:pre-wrap
- *  (the export converts them to <br/>), so the preview matches the exported result. */
-function setText(el: HTMLElement, text: string): void {
-  const normalized = text.replace(/\r\n?/g, '\n');
+/** The element's visible text runs (non-whitespace text nodes), one per line. */
+function visibleTextNodes(el: HTMLElement): Text[] {
   const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   const nodes: Text[] = [];
   while (walker.nextNode()) {
     const n = walker.currentNode as Text;
     if (n.nodeValue && n.nodeValue.trim()) nodes.push(n);
   }
-  if (nodes.length) {
-    nodes[0].nodeValue = normalized;
-    for (let i = 1; i < nodes.length; i++) nodes[i].nodeValue = '';
-  } else {
+  return nodes;
+}
+
+/** Read an element's editable text: one run (paragraph / list item) per line. */
+function captureRuns(el: HTMLElement): string {
+  return visibleTextNodes(el)
+    .map((n) => (n.nodeValue ?? '').trim())
+    .join('\n');
+}
+
+/** Write text back across the element's runs: each line fills one run (so paragraphs
+ *  and list items keep their place, styling and bullets), extra lines spill into the
+ *  last run, missing lines empty their run. Non-destructive in the preview (we don't
+ *  drop <li> here so cancel can restore — the export removes empty list items). */
+function setText(el: HTMLElement, text: string): void {
+  const normalized = text.replace(/\r\n?/g, '\n');
+  const nodes = visibleTextNodes(el);
+  const K = nodes.length;
+  if (!K) {
     el.textContent = normalized;
+    if (normalized.includes('\n')) el.style.whiteSpace = 'pre-wrap';
+    return;
   }
-  if (normalized.includes('\n')) el.style.whiteSpace = 'pre-wrap';
+  const lines = normalized.split('\n');
+  const M = lines.length;
+  const assign: (string | null)[] = new Array(K).fill(null);
+  if (M >= K) {
+    for (let i = 0; i < K - 1; i++) assign[i] = lines[i];
+    assign[K - 1] = lines.slice(K - 1).join('\n');
+  } else {
+    for (let i = 0; i < M; i++) assign[i] = lines[i];
+  }
+  for (let i = 0; i < K; i++) {
+    nodes[i].nodeValue = assign[i] ?? '';
+    if (assign[i] && assign[i]!.includes('\n')) el.style.whiteSpace = 'pre-wrap';
+  }
 }
 
 // NOTE: never use `instanceof HTMLElement` here — these elements live in the iframe's
@@ -150,8 +176,8 @@ export function setupInlineTextEdit(doc: Document, _win: Window, handlers: Inlin
       if (!isTextEl(el)) return;
       ev.preventDefault();
       ev.stopPropagation();
-      // innerText preserves line breaks (block/<br> boundaries); textContent doesn't
-      const current = (el.innerText || el.textContent || '').trim();
+      // one editable line per text run (paragraph / list item)
+      const current = captureRuns(el) || (el.textContent || '').trim();
       if (el.dataset.seFrom == null) el.dataset.seFrom = current;
       const from = el.dataset.seFrom;
       const r = el.getBoundingClientRect();

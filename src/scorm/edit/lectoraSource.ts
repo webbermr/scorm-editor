@@ -87,19 +87,51 @@ function textSegments(arg: string): Segment[] {
   return out;
 }
 
-/** Rewrite the visible text of one element's argument: the new text goes into the
- *  first run, the remaining runs are cleared (mirroring the live preview). Keyed on
- *  the element id, which is authoritative — we don't gate on the old text matching,
- *  since the rendered DOM decodes entities/whitespace in ways the source doesn't, and
- *  the user explicitly chose this element. Null only if there's no text run to write. */
+/** The enclosing `<li>…</li>` span around a position in the arg, or null. Used to
+ *  drop a whole list item (bullet and all) instead of leaving an empty bullet. */
+function enclosingLi(arg: string, pos: number): { start: number; end: number } | null {
+  const open = arg.lastIndexOf('<li', pos);
+  if (open < 0) return null;
+  const after = arg[open + 3];
+  if (after !== ' ' && after !== '>' && after !== '\t' && after !== '\\') return null; // not a real <li tag
+  const close = arg.indexOf('</li', pos);
+  if (close < 0) return null;
+  const gt = arg.indexOf('>', close);
+  if (gt < 0) return null;
+  return { start: open, end: gt + 1 };
+}
+
+/** Distribute the new text across the element's text runs: each line fills one run
+ *  (so paragraphs and list items keep their place, styling and bullets). Extra lines
+ *  spill into the last run (rendered with <br/>); missing lines drop their run — and
+ *  if that run is a list item, the whole <li> is removed so no empty bullet remains.
+ *  Keyed on the element id (authoritative); null if there's no text run to write. */
 function replaceVisibleText(arg: string, to: string): string | null {
   const visible = textSegments(arg).filter((s) => normalizeVisible(s.raw).length > 0);
-  if (!visible.length) return null;
+  const K = visible.length;
+  if (!K) return null;
+
+  const lines = to.replace(/\r\n?/g, '\n').split('\n');
+  const M = lines.length;
+  const assign: (string | null)[] = new Array(K).fill(null);
+  if (M >= K) {
+    for (let i = 0; i < K - 1; i++) assign[i] = lines[i];
+    assign[K - 1] = lines.slice(K - 1).join('\n'); // last run absorbs the remainder
+  } else {
+    for (let i = 0; i < M; i++) assign[i] = lines[i];
+    // runs M..K-1 stay null → removed
+  }
+
   let out = arg;
-  for (let i = visible.length - 1; i >= 0; i--) {
+  for (let i = K - 1; i >= 0; i--) {
     const seg = visible[i];
-    const text = i === 0 ? toSourceText(to) : '';
-    out = out.slice(0, seg.start) + text + out.slice(seg.end);
+    if (assign[i] == null) {
+      const li = enclosingLi(out, seg.start);
+      if (li) out = out.slice(0, li.start) + out.slice(li.end);
+      else out = out.slice(0, seg.start) + out.slice(seg.end);
+    } else {
+      out = out.slice(0, seg.start) + toSourceText(assign[i]!) + out.slice(seg.end);
+    }
   }
   return out;
 }
