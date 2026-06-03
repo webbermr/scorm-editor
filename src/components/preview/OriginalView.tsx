@@ -45,9 +45,9 @@ export function OriginalView({ href, style, title = 'Original page', fill = fals
   const flowRef = useRef(false);
   // controller for the in-iframe text editor (per loaded page)
   const editCtrlRef = useRef<InlineEditController | null>(null);
-  // the page the controller is currently set up for (so re-syncs are idempotent and
-  // don't tear down an in-progress edit — see syncEditMode)
-  const setupPageRef = useRef<string | null>(null);
+  // the page + mode the controller is currently set up for (so re-syncs are
+  // idempotent and don't tear down an in-progress edit — see syncEditMode)
+  const setupKeyRef = useRef<string | null>(null);
   // the text element currently being edited via the popover (parent-document input)
   const [active, setActive] = useState<ActiveEdit | null>(null);
   const activeRef = useRef<ActiveEdit | null>(null);
@@ -80,19 +80,17 @@ export function OriginalView({ href, style, title = 'Original page', fill = fals
   const detachEdit = useCallback(() => {
     editCtrlRef.current?.teardown();
     editCtrlRef.current = null;
-    setupPageRef.current = null;
+    setupKeyRef.current = null;
     setActive(null);
   }, []);
 
-  // Attach click-to-edit to the currently loaded page. Idempotent: if the controller
-  // is already set up for this same page it does NOTHING — so the repeated post-load
-  // syncs (and any stray load events) can't tear down a popover edit in progress.
-  // Only a genuine page change or turning editing off resets it.
+  // Wire the page for editing/preview. Edits are applied to the page whenever any
+  // exist (so the preview reflects them with editing OFF too); click-to-edit is added
+  // only in edit mode. Idempotent per (page, mode): repeated post-load/stray syncs for
+  // the same page+mode do nothing, so they can't tear down a popover edit in progress.
   const syncEditMode = useCallback(() => {
-    if (!editable) {
-      detachEdit();
-      return;
-    }
+    const edits = getEdits?.() ?? [];
+    const wantSetup = editable || edits.length > 0;
     const iframe = iframeRef.current;
     if (!iframe) return;
     let doc: Document | null = null;
@@ -104,20 +102,19 @@ export function OriginalView({ href, style, title = 'Original page', fill = fals
       return; // cross-origin (shouldn't happen)
     }
     if (!doc || !doc.body || !win) return; // page not ready yet
-    // Use the page URL only to detect real navigation (multi-file Lectora). In
-    // single-page/titlemgr builds the URL is stable and the controller's observer
-    // handles dynamically-swapped content.
+    if (!wantSetup) {
+      detachEdit();
+      return;
+    }
+    // Page URL detects real navigation (multi-file Lectora); in single-page/titlemgr
+    // builds the URL is stable and the controller's observer handles swapped content.
     const pageHref = resolvePageHref(win) ?? win.location.pathname;
-    // already wired for this exact page → leave the active edit untouched
-    if (editCtrlRef.current && setupPageRef.current === pageHref) return;
-    // different page (or first time) → reset and re-attach
+    const key = `${pageHref}|${editable ? 'edit' : 'view'}`;
+    if (editCtrlRef.current && setupKeyRef.current === key) return;
     editCtrlRef.current?.teardown();
-    setActive(null);
-    setupPageRef.current = pageHref;
-    editCtrlRef.current = setupInlineTextEdit(doc, win, {
-      getEdits: () => getEdits?.() ?? [],
-      onPick,
-    });
+    if (editable) setActive(null);
+    setupKeyRef.current = key;
+    editCtrlRef.current = setupInlineTextEdit(doc, win, { getEdits: () => getEdits?.() ?? [], onPick }, editable);
   }, [editable, getEdits, onPick, detachEdit]);
 
   // Commit / cancel the active popover edit.

@@ -72,43 +72,58 @@ const isTextEl = (el: Element | null): el is HTMLElement => !!el && typeof (el a
 
 const NOOP: InlineEditController = { teardown: () => {}, applyText: () => {}, setActive: () => {}, markEdited: () => {} };
 
-export function setupInlineTextEdit(doc: Document, _win: Window, handlers: InlineEditHandlers): InlineEditController {
+/**
+ * Wire up text handling on a rendered page.
+ *  - Edits are ALWAYS applied to the page (so the preview reflects them whether or
+ *    not editing is on), re-applied to content the player injects later via a
+ *    MutationObserver, reading the edit list LIVE so newly-made edits propagate.
+ *  - Click-to-edit + the hover/outline affordances are added only when `interactive`.
+ */
+export function setupInlineTextEdit(doc: Document, _win: Window, handlers: InlineEditHandlers, interactive: boolean): InlineEditController {
   if (!doc.body) return NOOP;
 
-  const style = doc.createElement('style');
-  style.setAttribute('data-se-style', '1');
-  style.textContent = EDIT_STYLE;
-  doc.head?.appendChild(style);
+  let style: HTMLStyleElement | null = null;
+  if (interactive) {
+    style = doc.createElement('style');
+    style.setAttribute('data-se-style', '1');
+    style.textContent = EDIT_STYLE;
+    doc.head?.appendChild(style);
+  }
 
-  // Tag a text element for the hover affordance + apply any saved edit to it.
-  const editsById = new Map(handlers.getEdits().map((e) => [e.elementId, e]));
-  const tagAndApply = (el: HTMLElement) => {
-    if (el.hasAttribute('data-se-text')) return;
-    el.setAttribute('data-se-text', '');
-    const e = editsById.get(el.id);
+  // Apply the current saved edit (looked up LIVE) to a text element, and add the
+  // editing affordances when interactive.
+  const applyEdit = (el: HTMLElement) => {
+    if (el.getAttribute('data-se-editing') != null) return; // mid-edit — leave it
+    const e = handlers.getEdits().find((x) => x.elementId === el.id);
     if (e) {
-      setText(el, e.to);
+      if ((el.textContent ?? '').trim() !== e.to.trim()) setText(el, e.to);
       el.dataset.seFrom = e.from;
-      if (e.to.trim() !== e.from.trim()) el.setAttribute('data-se-edited', '');
+    }
+    if (interactive) {
+      el.setAttribute('data-se-text', '');
+      if (e && e.to.trim() !== e.from.trim()) el.setAttribute('data-se-edited', '');
+      else el.removeAttribute('data-se-edited');
     }
   };
 
-  // Tag every text element present now…
+  const processTree = (root: Element) => {
+    if (root.id && TEXT_ID_RE.test(root.id)) applyEdit(root as HTMLElement);
+    root.querySelectorAll?.('[id]')?.forEach((c) => {
+      if (TEXT_ID_RE.test((c as HTMLElement).id)) applyEdit(c as HTMLElement);
+    });
+  };
+
+  // Every text element present now…
   for (const el of Array.from(doc.querySelectorAll<HTMLElement>('[id]'))) {
-    if (TEXT_ID_RE.test(el.id)) tagAndApply(el);
+    if (TEXT_ID_RE.test(el.id)) applyEdit(el);
   }
 
-  // …and any the player builds later (Lectora assembles some pages after load).
-  // Scoped to newly-added elements, so it never re-fires on our own text edits.
+  // …and any the player builds or swaps in later (Lectora titlemgr pages inject
+  // content client-side). Scoped to added nodes; reads edits live each time.
   const observer = new MutationObserver((muts) => {
     for (const m of muts) {
       for (const node of Array.from(m.addedNodes)) {
-        if (node.nodeType !== 1) continue;
-        const el = node as HTMLElement;
-        if (el.id && TEXT_ID_RE.test(el.id)) tagAndApply(el);
-        el.querySelectorAll?.('[id]')?.forEach((c) => {
-          if (TEXT_ID_RE.test((c as HTMLElement).id)) tagAndApply(c as HTMLElement);
-        });
+        if (node.nodeType === 1) processTree(node as Element);
       }
     }
   });
@@ -120,28 +135,28 @@ export function setupInlineTextEdit(doc: Document, _win: Window, handlers: Inlin
 
   // Capture phase so we beat the player's own click/navigation handlers — but only
   // for text elements; everything else (nav buttons, links) is left alone.
-  const onClick = (ev: Event) => {
-    // match by id pattern (not the data-se-text tag) so late-built elements are
-    // editable even if they weren't tagged at setup time
-    const target = ev.target as Element | null;
-    const el = target?.closest?.('[id]') as HTMLElement | null;
-    if (!isTextEl(el)) return;
-    ev.preventDefault();
-    ev.stopPropagation();
-    const current = (el.textContent ?? '').trim();
-    if (el.dataset.seFrom == null) el.dataset.seFrom = current;
-    const from = el.dataset.seFrom;
-    const r = el.getBoundingClientRect();
-    handlers.onPick({ elementId: el.id, from, value: current, rect: { top: r.top, left: r.left, width: r.width, height: r.height } });
-  };
-
-  doc.addEventListener('click', onClick, true);
+  let onClick: ((ev: Event) => void) | null = null;
+  if (interactive) {
+    onClick = (ev: Event) => {
+      const target = ev.target as Element | null;
+      const el = target?.closest?.('[id]') as HTMLElement | null;
+      if (!isTextEl(el)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const current = (el.textContent ?? '').trim();
+      if (el.dataset.seFrom == null) el.dataset.seFrom = current;
+      const from = el.dataset.seFrom;
+      const r = el.getBoundingClientRect();
+      handlers.onPick({ elementId: el.id, from, value: current, rect: { top: r.top, left: r.left, width: r.width, height: r.height } });
+    };
+    doc.addEventListener('click', onClick, true);
+  }
 
   return {
     teardown: () => {
-      doc.removeEventListener('click', onClick, true);
+      if (onClick) doc.removeEventListener('click', onClick, true);
       try { observer.disconnect(); } catch { /* */ }
-      style.remove();
+      style?.remove();
       doc.querySelectorAll('[data-se-text]').forEach((el) => {
         el.removeAttribute('data-se-text');
         el.removeAttribute('data-se-editing');
