@@ -31,8 +31,12 @@ const htmlEscape = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g,
 const jsEscape = (s: string): string =>
   s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r/g, '').replace(/\n/g, '\\n');
 
-/** The form a piece of visible text takes inside the addInnerText('…') argument. */
-const toSourceText = (s: string): string => jsEscape(htmlEscape(s));
+/** The form a piece of visible text takes inside the addInnerText('…') argument.
+ *  Typed line breaks become <br /> so they survive (HTML collapses bare newlines). */
+const toSourceText = (s: string): string => {
+  const html = htmlEscape(s.replace(/\r\n?/g, '\n')).replace(/\n/g, '<br />');
+  return jsEscape(html);
+};
 
 /** Normalize a text fragment for comparison: undo JS-string escapes, decode the
  *  common HTML entities, collapse whitespace. Lets the original visible text (from

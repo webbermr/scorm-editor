@@ -49,8 +49,11 @@ const EDIT_STYLE = `
   [data-se-edited] { outline: 1px dashed rgba(43,138,62,.7) !important; outline-offset: 2px; }
 `;
 
-/** Set an element's visible text while preserving its first styled run (span/font). */
+/** Set an element's visible text while preserving its first styled run (span/font).
+ *  Typed line breaks are kept in the text node and rendered via white-space:pre-wrap
+ *  (the export converts them to <br/>), so the preview matches the exported result. */
 function setText(el: HTMLElement, text: string): void {
+  const normalized = text.replace(/\r\n?/g, '\n');
   const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   const nodes: Text[] = [];
   while (walker.nextNode()) {
@@ -58,11 +61,12 @@ function setText(el: HTMLElement, text: string): void {
     if (n.nodeValue && n.nodeValue.trim()) nodes.push(n);
   }
   if (nodes.length) {
-    nodes[0].nodeValue = text;
+    nodes[0].nodeValue = normalized;
     for (let i = 1; i < nodes.length; i++) nodes[i].nodeValue = '';
   } else {
-    el.textContent = text;
+    el.textContent = normalized;
   }
+  if (normalized.includes('\n')) el.style.whiteSpace = 'pre-wrap';
 }
 
 // NOTE: never use `instanceof HTMLElement` here — these elements live in the iframe's
@@ -96,7 +100,10 @@ export function setupInlineTextEdit(doc: Document, _win: Window, handlers: Inlin
     if (el.getAttribute('data-se-editing') != null) return; // mid-edit — leave it
     const e = handlers.getEdits().find((x) => x.elementId === el.id);
     if (e) {
-      if ((el.textContent ?? '').trim() !== e.to.trim()) setText(el, e.to);
+      if (el.dataset.seApplied !== e.to) {
+        setText(el, e.to);
+        el.dataset.seApplied = e.to;
+      }
       el.dataset.seFrom = e.from;
     }
     if (interactive) {
@@ -143,7 +150,8 @@ export function setupInlineTextEdit(doc: Document, _win: Window, handlers: Inlin
       if (!isTextEl(el)) return;
       ev.preventDefault();
       ev.stopPropagation();
-      const current = (el.textContent ?? '').trim();
+      // innerText preserves line breaks (block/<br> boundaries); textContent doesn't
+      const current = (el.innerText || el.textContent || '').trim();
       if (el.dataset.seFrom == null) el.dataset.seFrom = current;
       const from = el.dataset.seFrom;
       const r = el.getBoundingClientRect();
