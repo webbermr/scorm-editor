@@ -20,7 +20,8 @@ export function TopBar() {
   const setModal = useUi((s) => s.setModal);
 
   const { save } = useEditorActions();
-  const hasOriginal = usePreview((s) => !!s.file && s.supported && !!s.launchHref);
+  const hasPackage = usePreview((s) => !!s.file && !!s.launchHref);
+  const previewSupported = usePreview((s) => s.supported);
   const resetUi = useUi((s) => s.reset);
 
   const startOver = () => {
@@ -129,8 +130,14 @@ export function TopBar() {
       </button>
 
       <div style={{ width: 1, height: 24, background: 'var(--line)' }} />
-      {hasOriginal && (
-        <button className="btn btn-soft tip" data-tip="See the imported package rendered as the LMS would" onClick={() => setModal('original')}>
+      {hasPackage && (
+        <button
+          className="btn btn-soft tip"
+          data-tip={previewSupported ? 'See the imported package rendered as the LMS would' : 'Needs HTTPS or localhost (service worker required)'}
+          onClick={() => previewSupported && setModal('original')}
+          disabled={!previewSupported}
+          style={{ opacity: previewSupported ? 1 : 0.5 }}
+        >
           <Icon name="eye" size={16} /> Original
         </button>
       )}

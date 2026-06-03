@@ -13,3 +13,6 @@ dist-ssr
 
 # docker image exports
 *.tar
+
+# secrets (Cloudflare tunnel token, etc.)
+.env

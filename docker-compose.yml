@@ -6,3 +6,17 @@ services:
     ports:
       - "8081:80"
     restart: unless-stopped
+
+  # Cloudflare Tunnel — exposes the app at your public hostname over trusted HTTPS
+  # (so "View Original" works for remote users). The connector reaches the app on
+  # the internal compose network at scorm-editor:80 (the URL set in the Cloudflare
+  # dashboard's Public Hostname). Token comes from .env (git-ignored).
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: scorm-editor-tunnel
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    depends_on:
+      - scorm-editor
+    restart: unless-stopped

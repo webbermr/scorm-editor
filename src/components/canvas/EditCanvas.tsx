@@ -15,8 +15,12 @@ interface Props {
 
 export function EditCanvas({ slide, slideIndex, total }: Props) {
   const selectBlock = useUi((s) => s.selectBlock);
-  const canShowOriginal = usePreview((s) => !!s.file && s.supported);
-  const hasOriginal = canShowOriginal && !!slide.sourceHref;
+  const hasFile = usePreview((s) => !!s.file);
+  const supported = usePreview((s) => s.supported);
+  // an imported package with a source page for this slide → offer the toggle
+  const showToggle = hasFile && !!slide.sourceHref;
+  // the Original render itself needs a secure context (service worker)
+  const hasOriginal = showToggle && supported;
 
   const [view, setView] = useState<'blocks' | 'original'>('blocks');
   // reset to the editable view whenever the selected slide changes
@@ -52,12 +56,18 @@ export function EditCanvas({ slide, slideIndex, total }: Props) {
             </span>
           )}
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-            {hasOriginal && (
+            {showToggle && (
               <div className="seg" onMouseDown={(e) => e.stopPropagation()}>
                 <button className={view === 'blocks' ? 'on' : ''} onClick={() => setView('blocks')}>
                   <Icon name="edit" size={14} /> Blocks
                 </button>
-                <button className={view === 'original' ? 'on' : ''} onClick={() => setView('original')}>
+                <button
+                  className={`${view === 'original' && hasOriginal ? 'on' : ''} ${supported ? '' : 'tip'}`}
+                  data-tip={supported ? undefined : 'Original view needs HTTPS or localhost'}
+                  disabled={!supported}
+                  onClick={() => supported && setView('original')}
+                  style={{ opacity: supported ? 1 : 0.45, cursor: supported ? 'pointer' : 'default' }}
+                >
                   <Icon name="eye" size={14} /> Original
                 </button>
               </div>
