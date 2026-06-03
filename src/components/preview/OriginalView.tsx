@@ -24,12 +24,15 @@ export function OriginalView({ href, style, title = 'Original page', fill = fals
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  // sticky document-flow classification (reset per page) — see fit()
+  const flowRef = useRef(false);
   const [src, setSrc] = useState<string | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [size, setSize] = useState({ w: 0, h: 520 });
 
   useEffect(() => {
     let cancelled = false;
+    flowRef.current = false; // re-classify for the new page
     setState('loading');
     setSrc(null);
     if (!supported || !hasFile || !href) {
@@ -57,26 +60,33 @@ export function OriginalView({ href, style, title = 'Original page', fill = fals
     const containerW = wrap.clientWidth;
     if (!containerW) return;
 
+    // only update state when the size actually changes (avoids a render→measure loop)
+    const apply = (w: number, h: number) => setSize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
+
     if (fill) {
       // Modal: fill the available area; the page (course player) reflows to fit.
-      setSize({ w: containerW, h: wrap.clientHeight || 600 });
+      apply(containerW, wrap.clientHeight || 600);
       return;
     }
 
-    // Detect document-flow vs fixed-window by probing: a fixed-window (height:100%)
-    // page reports a scrollHeight close to whatever height we give it.
-    let h = Math.round(containerW * 0.62); // default slide-ratio viewport
+    let sh = 0;
     try {
       const doc = iframe.contentDocument;
-      if (doc?.body) {
-        const probe = iframe.clientHeight || 600;
-        const sh = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight);
-        if (sh > probe + 80) h = Math.min(sh, 12000); // taller than the frame → real content height
-      }
+      if (doc?.body) sh = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight);
     } catch {
       /* cross-origin (shouldn't happen) — keep the viewport default */
     }
-    setSize({ w: containerW, h });
+
+    // Classify document-flow vs fixed-window. A page whose content overflows a frame
+    // shorter than itself is document-flow; one that fills whatever height we give it
+    // is a fixed-window slide. The flag is STICKY (only flips to document-flow), so we
+    // never shrink back to the viewport height once the content height is known —
+    // which is what caused the grow/shrink flicker.
+    const probe = iframe.clientHeight || 600;
+    if (sh > probe + 80) flowRef.current = true;
+
+    const h = flowRef.current && sh ? Math.min(sh, 20000) : Math.round(containerW * 0.62);
+    apply(containerW, h);
   }, [fill]);
 
   const onLoad = () => {
