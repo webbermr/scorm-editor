@@ -49,6 +49,23 @@ const attr = (node: AnyNode, name: string): string | undefined => {
   return v == null ? undefined : String(v);
 };
 
+/** Read an attribute by local name, ignoring any namespace prefix and case.
+ *  e.g. finds `adlcp:scormType`, `adlcp:scormtype`, or a bare `scormType`. */
+const attrLocal = (node: AnyNode, localName: string): string | undefined => {
+  if (!node || typeof node !== 'object') return undefined;
+  const want = localName.toLowerCase();
+  for (const key of Object.keys(node)) {
+    if (!key.startsWith('@_')) continue;
+    const raw = key.slice(2);
+    const localPart = raw.includes(':') ? raw.slice(raw.lastIndexOf(':') + 1) : raw;
+    if (localPart.toLowerCase() === want) {
+      const v = node[key];
+      return v == null ? undefined : String(v);
+    }
+  }
+  return undefined;
+};
+
 /** Find a child value by local name, ignoring any namespace prefix. */
 const local = (node: AnyNode, localName: string): AnyNode => {
   if (!node || typeof node !== 'object') return undefined;
@@ -156,7 +173,7 @@ export function parseManifest(xml: string, fallbackTitle = 'Imported course'): P
     resources.set(id, {
       identifier: id,
       href: attr(res, 'href'),
-      scormType: attr(res, 'scormType') ?? attr(res, 'scormtype'),
+      scormType: attrLocal(res, 'scormType'),
       files,
       dependencies,
     });

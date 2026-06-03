@@ -5,10 +5,10 @@ import { Toggle } from '@/components/ui/Toggle';
 import { useCourse } from '@/store/courseStore';
 import { useUi } from '@/store/uiStore';
 import { usePreview } from '@/store/previewStore';
-import { buildScormPackage, downloadBlob, type ExportResult } from '@/scorm/export';
+import { buildScormPackage, downloadBlob, type ExportResult, type ValidationReport } from '@/scorm/export';
 import type { ScormVersion } from '@/types/course';
 
-type Phase = 'config' | 'building' | 'done' | 'error';
+type Phase = 'config' | 'building' | 'review' | 'error';
 type Mode = 'blocks' | 'original';
 
 const MODE_OPTIONS: Array<{ id: Mode; label: string; desc: string }> = [
@@ -44,6 +44,7 @@ export function ExportModal() {
   const [opts, setOpts] = useState({ minify: true, includeSource: false, manifest: true });
   const [phase, setPhase] = useState<Phase>('config');
   const [error, setError] = useState<string>('');
+  const [report, setReport] = useState<ValidationReport | null>(null);
   const resultRef = useRef<ExportResult | null>(null);
 
   // Original-passthrough keeps the source package's SCORM version.
@@ -61,7 +62,8 @@ export function ExportModal() {
     try {
       const result = await buildScormPackage(course, { name, version: effectiveVersion, mode, ...opts }, originalFile, removedPages);
       resultRef.current = result;
-      setPhase('done');
+      setReport(result.report);
+      setPhase('review');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Packaging failed.');
       setPhase('error');
@@ -145,24 +147,14 @@ export function ExportModal() {
         </div>
       )}
 
-      {phase === 'done' && (
-        <div style={{ padding: '40px 28px', textAlign: 'center' }}>
-          <div style={{ width: 56, height: 56, borderRadius: 99, background: 'var(--green-soft)', color: 'var(--green)', display: 'grid', placeItems: 'center', margin: '0 auto 16px' }}>
-            <Icon name="check" size={30} stroke={3} />
-          </div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700 }}>Package ready</div>
-          <div style={{ fontSize: 13.5, color: 'var(--ink-2)', margin: '6px 0 20px' }}>
-            <span style={{ fontFamily: 'var(--font-mono)' }}>{resultRef.current?.filename}</span> · {resultRef.current?.size} · SCORM {effectiveVersion}
-          </div>
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-            <button className="btn btn-soft" onClick={close}>
-              Close
-            </button>
-            <button className="btn btn-primary" onClick={download}>
-              <Icon name="download" size={16} /> Download .zip
-            </button>
-          </div>
-        </div>
+      {phase === 'review' && report && (
+        <ReviewPanel
+          report={report}
+          result={resultRef.current}
+          version={effectiveVersion}
+          onBack={() => setPhase('config')}
+          onDownload={download}
+        />
       )}
 
       {phase === 'error' && (
@@ -183,5 +175,92 @@ export function ExportModal() {
         </div>
       )}
     </Modal>
+  );
+}
+
+function ReviewPanel({
+  report,
+  result,
+  version,
+  onBack,
+  onDownload,
+}: {
+  report: ValidationReport;
+  result: ExportResult | null;
+  version: ScormVersion;
+  onBack: () => void;
+  onDownload: () => void;
+}) {
+  const errs = report.errors;
+  const warns = report.warnings;
+  const tone = !report.ok ? 'error' : warns.length ? 'warn' : 'ok';
+  const palette = {
+    ok: { bg: 'var(--green-soft)', fg: 'var(--green)', icon: 'check' as const, title: 'Validation passed' },
+    warn: { bg: 'var(--amber-soft)', fg: 'var(--amber)', icon: 'warning' as const, title: `Passed with ${warns.length} warning${warns.length === 1 ? '' : 's'}` },
+    error: { bg: 'var(--rose-soft)', fg: 'var(--rose)', icon: 'warning' as const, title: `${errs.length} issue${errs.length === 1 ? '' : 's'} to fix` },
+  }[tone];
+
+  return (
+    <div style={{ padding: 22 }}>
+      {/* status banner */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 'var(--r-md)', background: palette.bg, marginBottom: 16 }}>
+        <div style={{ width: 34, height: 34, borderRadius: 99, background: '#fff6', color: palette.fg, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+          <Icon name={palette.icon} size={20} stroke={tone === 'ok' ? 3 : 2} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, color: palette.fg }}>{palette.title}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginTop: 1 }}>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>{result?.filename}</span> · {result?.size} · SCORM {version}
+          </div>
+        </div>
+      </div>
+
+      {/* checklist */}
+      <div className="card" style={{ padding: '6px 14px', marginBottom: errs.length || warns.length ? 14 : 18 }}>
+        {report.checks.map((c, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < report.checks.length - 1 ? '1px solid var(--line)' : 'none' }}>
+            <span style={{ width: 18, height: 18, borderRadius: 99, display: 'grid', placeItems: 'center', flexShrink: 0, background: c.passed ? 'var(--green-soft)' : 'var(--rose-soft)', color: c.passed ? 'var(--green)' : 'var(--rose)' }}>
+              <Icon name={c.passed ? 'check' : 'close'} size={11} stroke={3} />
+            </span>
+            <span style={{ fontSize: 13, color: c.passed ? 'var(--ink-2)' : 'var(--ink)' }}>{c.label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* issues */}
+      {(errs.length > 0 || warns.length > 0) && (
+        <div style={{ maxHeight: 220, overflowY: 'auto', marginBottom: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {[...errs, ...warns].map((issue, i) => {
+            const isErr = issue.level === 'error';
+            return (
+              <div key={i} style={{ display: 'flex', gap: 9, padding: '9px 11px', borderRadius: 'var(--r-sm)', background: isErr ? 'var(--rose-soft)' : 'var(--amber-soft)', border: `1px solid ${isErr ? 'var(--rose)' : 'var(--amber)'}22` }}>
+                <span style={{ color: isErr ? 'var(--rose)' : 'var(--amber)', flexShrink: 0, marginTop: 1 }}>
+                  <Icon name={isErr ? 'warning' : 'info'} size={15} />
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.4 }}>{issue.message}</div>
+                  {issue.detail && <div style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 2, lineHeight: 1.4 }}>{issue.detail}</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+        <button className="btn btn-ghost" onClick={onBack}>
+          <Icon name="arrowLeft" size={15} /> Back
+        </button>
+        {report.ok ? (
+          <button className="btn btn-primary" onClick={onDownload}>
+            <Icon name="download" size={16} /> Download .zip
+          </button>
+        ) : (
+          <button className="btn btn-soft" onClick={onDownload} style={{ color: 'var(--rose)' }}>
+            <Icon name="download" size={16} /> Download anyway
+          </button>
+        )}
+      </div>
+    </div>
   );
 }

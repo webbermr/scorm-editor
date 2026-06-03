@@ -120,6 +120,16 @@ export interface Scenario {
   choices: ScenarioChoice[];
 }
 
+// ---- In-place source edits (authoring-tool pages, e.g. Lectora) ----
+
+/** A text change to a runtime-rendered element, keyed by its source element id
+ *  (e.g. "text236596"). `from` is the original visible text; `to` is the new. */
+export interface SourceTextEdit {
+  elementId: string;
+  from: string;
+  to: string;
+}
+
 // ---- Slide ----
 
 export interface Slide {
@@ -160,6 +170,11 @@ export interface CourseMeta {
 export interface Course {
   meta: CourseMeta;
   slides: Slide[];
+  /** in-place text edits to original page source, keyed by element id (which is
+   *  globally unique in a Lectora title). Applied on faithful export to every
+   *  source page that contains the element — so shared chrome (e.g. a copyright
+   *  line repeated on every page) and single-page (titlemgr) builds both work. */
+  textEdits?: SourceTextEdit[];
 }
 
 // ---- Supporting reference data ----

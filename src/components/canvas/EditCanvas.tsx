@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { TYPE_META } from '@/lib/typeMeta';
 import { useUi } from '@/store/uiStore';
@@ -6,6 +6,7 @@ import { useCourse } from '@/store/courseStore';
 import { usePreview } from '@/store/previewStore';
 import { SlideBody } from './SlideBody';
 import { OriginalView } from '@/components/preview/OriginalView';
+import type { InlineEdit } from '@/scorm/preview/inlineTextEdit';
 import type { Slide } from '@/types/course';
 
 interface Props {
@@ -54,8 +55,21 @@ export function EditCanvas({ slide, slideIndex, total }: Props) {
   const hasOriginal = showToggle && supported;
 
   const [view, setView] = useState<'blocks' | 'original'>('blocks');
+  const [editText, setEditText] = useState(false);
+  const canEditText = authoringTool === 'Lectora';
+  const editCount = useCourse((s) => s.course.textEdits?.length ?? 0);
   // reset to the editable view whenever the selected slide changes
-  useEffect(() => setView('blocks'), [slide.id]);
+  useEffect(() => {
+    setView('blocks');
+    setEditText(false);
+  }, [slide.id]);
+
+  // Stable handlers (read the store directly) — course-wide edits keyed by element id.
+  const getEdits = useCallback((): InlineEdit[] => useCourse.getState().course.textEdits ?? [], []);
+  const onEdit = useCallback((elementId: string, from: string, to: string) => {
+    useCourse.getState().setTextEdit(elementId, from, to);
+    useUi.getState().flash(to.trim() === from.trim() ? 'Reverted to original' : 'Text edited — applies on Faithful export');
+  }, []);
 
   return (
     <div style={{ flex: 1, padding: '30px 40px', display: 'flex', justifyContent: 'center' }} onMouseDown={() => selectBlock(null)}>
@@ -103,6 +117,21 @@ export function EditCanvas({ slide, slideIndex, total }: Props) {
                 </button>
               </div>
             )}
+            {view === 'original' && hasOriginal && canEditText && (
+              <button
+                className={`btn btn-sm tip ${editText ? 'btn-primary' : 'btn-soft'}`}
+                data-tip={editText ? 'Done editing text' : 'Click any text on the page to edit it'}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={() => setEditText((v) => !v)}
+              >
+                <Icon name={editText ? 'check' : 'edit'} size={14} /> {editText ? 'Done' : 'Edit text'}
+                {editCount > 0 && (
+                  <span className="badge" style={{ marginLeft: 6, background: editText ? '#fff3' : 'var(--accent-soft)', color: editText ? '#fff' : 'var(--accent-ink)' }}>
+                    {editCount}
+                  </span>
+                )}
+              </button>
+            )}
             <span style={{ fontSize: 12, color: 'var(--ink-3)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
               <Icon name="clock" size={13} /> {slide.duration}
             </span>
@@ -110,7 +139,7 @@ export function EditCanvas({ slide, slideIndex, total }: Props) {
         </div>
 
         {view === 'original' && hasOriginal ? (
-          <OriginalView href={slide.sourceHref ?? null} title={slide.name} />
+          <OriginalView href={slide.sourceHref ?? null} title={slide.name} editable={editText} getEdits={getEdits} onEdit={onEdit} />
         ) : (
           <div onMouseDown={(e) => e.stopPropagation()}>
             <SlideBody slide={slide} editing />

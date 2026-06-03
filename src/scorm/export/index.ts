@@ -7,7 +7,11 @@ import { buildManifest, type SlideResource } from './buildManifest';
 import { parseManifest } from '@/scorm/import/parseManifest';
 import { dirname, join } from '@/scorm/import/paths';
 import { planLectoraDeletions, type LectoraEdits } from './lectoraEdit';
+import { validatePackage, noteSize, type ValidationReport } from './validate';
+import { applyTextEdits } from '@/scorm/edit/lectoraSource';
 import type { Block, Course, ScormVersion } from '@/types/course';
+
+export type { ValidationReport, ValidationIssue, ValidationCheck } from './validate';
 
 export interface ExportOptions {
   name: string;
@@ -28,6 +32,8 @@ export interface ExportResult {
   filename: string;
   size: string;
   bytes: number;
+  /** pre-download validation of the generated package */
+  report: ValidationReport;
 }
 
 const humanSize = (bytes: number): string => {
@@ -187,16 +193,19 @@ export async function buildScormPackage(
   const manifestXml = buildManifest(course, version, slideRes);
   zip.file('imsmanifest.xml', manifestXml);
   if (opts.includeSource) zip.file('source/course.json', JSON.stringify(course, null, 2));
-  validateManifest(manifestXml, version, slideRes.length);
+
+  // Validate the generated package before producing the downloadable blob.
+  const report = await validatePackage(zip, { expectedVersion: version });
 
   const blob = await zip.generateAsync({
     type: 'blob',
     compression: 'DEFLATE',
     compressionOptions: { level: opts.minify ? 9 : 6 },
   });
+  noteSize(report, blob.size);
 
   const filename = `${opts.name || 'course'}.zip`;
-  return { blob, filename, size: humanSize(blob.size), bytes: blob.size };
+  return { blob, filename, size: humanSize(blob.size), bytes: blob.size, report };
 }
 
 const xmlEscape = (s: string): string =>
@@ -242,13 +251,33 @@ async function buildOriginalPackage(course: Course, opts: ExportOptions, origina
     edits = await planLectoraDeletions(src, new Set(removedPages));
   }
 
+  // Global in-place text edits (keyed by element id). Applied to every source page
+  // that contains the element — shared chrome and single-page (titlemgr) builds both
+  // need this, since the element appears in many pages / the URL doesn't identify it.
+  const textEdits = course.textEdits ?? [];
+  const isHtml = (p: string) => /\.html?$/i.test(p);
+  const decoder = new TextDecoder('utf-8');
+
   const tasks: Promise<void>[] = [];
   src.forEach((path, entry) => {
     if (entry.dir) return;
     if (manifestPath && path === manifestPath) return; // patched below
     if (edits?.removed.has(path)) return; // page removed by the editor
     if (edits?.rewrites.has(path)) {
-      out.file(path, edits.rewrites.get(path)!);
+      // page already rewritten by nav surgery — apply text edits on top of it
+      let content = edits.rewrites.get(path)!;
+      if (textEdits.length && isHtml(path)) content = applyTextEdits(content, textEdits).source;
+      out.file(path, content);
+      return;
+    }
+    if (textEdits.length && isHtml(path)) {
+      tasks.push(
+        entry.async('uint8array').then((data) => {
+          const r = applyTextEdits(decoder.decode(data), textEdits);
+          // keep unchanged pages byte-identical; only rewrite pages we actually touched
+          out.file(path, r.applied.length ? r.source : data);
+        }),
+      );
       return;
     }
     tasks.push(
@@ -279,33 +308,21 @@ async function buildOriginalPackage(course: Course, opts: ExportOptions, origina
 
   if (opts.includeSource) out.file('scorm-editor/course.json', JSON.stringify(course, null, 2));
 
+  // Validate the re-packaged source — especially important after Lectora page
+  // surgery, which rewrites navigation and prunes manifest <file> entries.
+  const report = await validatePackage(out, { expectedVersion: course.meta.scormVersion });
+
   const blob = await out.generateAsync({
     type: 'blob',
     compression: 'DEFLATE',
     compressionOptions: { level: opts.minify ? 9 : 6 },
   });
+  noteSize(report, blob.size);
+
   const filename = `${opts.name || 'course'}.zip`;
-  return { blob, filename, size: humanSize(blob.size), bytes: blob.size };
+  return { blob, filename, size: humanSize(blob.size), bytes: blob.size, report };
 }
 
-
-export function validateManifest(xml: string, version: ScormVersion, expectedResources: number): void {
-  let parsed;
-  try {
-    parsed = parseManifest(xml);
-  } catch (e) {
-    throw new Error(`Generated manifest is invalid: ${e instanceof Error ? e.message : 'parse error'}`);
-  }
-  if (parsed.version !== version) {
-    throw new Error(`Manifest version mismatch — expected ${version}, generated ${parsed.version}.`);
-  }
-  if (parsed.resources.size !== expectedResources) {
-    throw new Error(`Manifest resource count mismatch — expected ${expectedResources}, found ${parsed.resources.size}.`);
-  }
-  if (!parsed.items.some((i) => i.launchable)) {
-    throw new Error('Manifest has no launchable items.');
-  }
-}
 
 export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);

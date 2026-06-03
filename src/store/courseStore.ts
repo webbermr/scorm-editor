@@ -107,6 +107,11 @@ export interface CourseStore {
   patchSlide: (slideId: string, patch: Partial<Slide>) => void;
   patchBlock: (slideId: string, blockId: string, patch: Partial<Block>) => void;
 
+  /** Record an in-place text edit on an imported page element (Lectora etc.),
+   *  keyed by element id (globally unique). Re-editing the same element updates the
+   *  entry; setting `to` back to the original `from` clears it. */
+  setTextEdit: (elementId: string, from: string, to: string) => void;
+
   /** Insert a new slide of `type` after `afterId`; returns the new slide id. */
   addSlideAfter: (type: SlideType, afterId: string) => string;
   /** Returns the id that should be selected next, or null if deletion was blocked (last slide). */
@@ -172,6 +177,14 @@ export const useCourse = create<CourseStore>((set, get) => ({
           : s,
       ),
     })),
+
+  setTextEdit: (elementId, from, to) =>
+    get().commit((c) => {
+      const others = (c.textEdits ?? []).filter((e) => e.elementId !== elementId);
+      // dropping the edit (text returned to original) → remove the entry
+      const next = to.trim() === from.trim() ? others : [...others, { elementId, from, to }];
+      return { ...c, textEdits: next.length ? next : undefined };
+    }),
 
   addSlideAfter: (type, afterId) => {
     const label = SLIDE_TYPES.find((x) => x.id === type)?.label ?? 'New';
