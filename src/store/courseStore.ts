@@ -107,6 +107,11 @@ export interface CourseStore {
   patchSlide: (slideId: string, patch: Partial<Slide>) => void;
   patchBlock: (slideId: string, blockId: string, patch: Partial<Block>) => void;
 
+  /** Record an in-place text edit on an imported page element (Lectora etc.).
+   *  Re-editing the same element updates the existing entry; setting `to` back to
+   *  the original `from` clears it. */
+  setSourceTextEdit: (slideId: string, elementId: string, from: string, to: string) => void;
+
   /** Insert a new slide of `type` after `afterId`; returns the new slide id. */
   addSlideAfter: (type: SlideType, afterId: string) => string;
   /** Returns the id that should be selected next, or null if deletion was blocked (last slide). */
@@ -171,6 +176,25 @@ export const useCourse = create<CourseStore>((set, get) => ({
           ? { ...s, blocks: s.blocks?.map((b) => (b.id === blockId ? ({ ...b, ...patch } as Block) : b)) }
           : s,
       ),
+    })),
+
+  setSourceTextEdit: (slideId, elementId, from, to) =>
+    get().commit((c) => ({
+      ...c,
+      slides: c.slides.map((s) => {
+        if (s.id !== slideId) return s;
+        const existing = s.sourceEdits?.text ?? [];
+        const others = existing.filter((e) => e.elementId !== elementId);
+        // dropping the edit (text returned to original) → remove the entry
+        const next = to.trim() === from.trim() ? others : [...others, { elementId, from, to }];
+        const text = next.length ? next : undefined;
+        const sourceEdits = text ? { ...s.sourceEdits, text } : (() => {
+          const rest = { ...s.sourceEdits };
+          delete rest.text;
+          return Object.keys(rest).length ? rest : undefined;
+        })();
+        return { ...s, sourceEdits };
+      }),
     })),
 
   addSlideAfter: (type, afterId) => {

@@ -120,6 +120,21 @@ export interface Scenario {
   choices: ScenarioChoice[];
 }
 
+// ---- In-place source edits (authoring-tool pages, e.g. Lectora) ----
+
+/** A text change to a runtime-rendered element, keyed by its source element id
+ *  (e.g. "text236596"). `from` is the original visible text; `to` is the new. */
+export interface SourceTextEdit {
+  elementId: string;
+  from: string;
+  to: string;
+}
+
+/** Edits applied directly to an imported page's source on faithful export. */
+export interface SourceEdits {
+  text?: SourceTextEdit[];
+}
+
 // ---- Slide ----
 
 export interface Slide {
@@ -135,6 +150,8 @@ export interface Slide {
   rawImported?: boolean;
   /** package-relative path of the original imported page (for the "View Original" iframe) */
   sourceHref?: string;
+  /** in-place edits to the original page source, applied on faithful export */
+  sourceEdits?: SourceEdits;
 }
 
 // ---- Course meta + root ----

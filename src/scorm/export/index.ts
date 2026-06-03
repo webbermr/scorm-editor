@@ -8,7 +8,8 @@ import { parseManifest } from '@/scorm/import/parseManifest';
 import { dirname, join } from '@/scorm/import/paths';
 import { planLectoraDeletions, type LectoraEdits } from './lectoraEdit';
 import { validatePackage, noteSize, type ValidationReport } from './validate';
-import type { Block, Course, ScormVersion } from '@/types/course';
+import { applyTextEdits } from '@/scorm/edit/lectoraSource';
+import type { Block, Course, ScormVersion, SourceTextEdit } from '@/types/course';
 
 export type { ValidationReport, ValidationIssue, ValidationCheck } from './validate';
 
@@ -250,13 +251,31 @@ async function buildOriginalPackage(course: Course, opts: ExportOptions, origina
     edits = await planLectoraDeletions(src, new Set(removedPages));
   }
 
+  // In-place text edits the editor made on original pages, keyed by page href.
+  const textEdits = new Map<string, SourceTextEdit[]>();
+  for (const s of course.slides) {
+    if (s.sourceHref && s.sourceEdits?.text?.length) textEdits.set(s.sourceHref, s.sourceEdits.text);
+  }
+
   const tasks: Promise<void>[] = [];
   src.forEach((path, entry) => {
     if (entry.dir) return;
     if (manifestPath && path === manifestPath) return; // patched below
     if (edits?.removed.has(path)) return; // page removed by the editor
+    const pageTextEdits = textEdits.get(path);
     if (edits?.rewrites.has(path)) {
-      out.file(path, edits.rewrites.get(path)!);
+      // page already rewritten by nav surgery — apply text edits on top of it
+      let content = edits.rewrites.get(path)!;
+      if (pageTextEdits) content = applyTextEdits(content, pageTextEdits).source;
+      out.file(path, content);
+      return;
+    }
+    if (pageTextEdits) {
+      tasks.push(
+        entry.async('string').then((str) => {
+          out.file(path, applyTextEdits(str, pageTextEdits).source);
+        }),
+      );
       return;
     }
     tasks.push(
