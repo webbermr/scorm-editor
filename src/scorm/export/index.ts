@@ -9,7 +9,7 @@ import { dirname, join } from '@/scorm/import/paths';
 import { planLectoraDeletions, type LectoraEdits } from './lectoraEdit';
 import { validatePackage, noteSize, type ValidationReport } from './validate';
 import { applyTextEdits } from '@/scorm/edit/lectoraSource';
-import type { Block, Course, ScormVersion, SourceTextEdit } from '@/types/course';
+import type { Block, Course, ScormVersion } from '@/types/course';
 
 export type { ValidationReport, ValidationIssue, ValidationCheck } from './validate';
 
@@ -251,29 +251,31 @@ async function buildOriginalPackage(course: Course, opts: ExportOptions, origina
     edits = await planLectoraDeletions(src, new Set(removedPages));
   }
 
-  // In-place text edits the editor made on original pages, keyed by page href.
-  const textEdits = new Map<string, SourceTextEdit[]>();
-  for (const s of course.slides) {
-    if (s.sourceHref && s.sourceEdits?.text?.length) textEdits.set(s.sourceHref, s.sourceEdits.text);
-  }
+  // Global in-place text edits (keyed by element id). Applied to every source page
+  // that contains the element — shared chrome and single-page (titlemgr) builds both
+  // need this, since the element appears in many pages / the URL doesn't identify it.
+  const textEdits = course.textEdits ?? [];
+  const isHtml = (p: string) => /\.html?$/i.test(p);
+  const decoder = new TextDecoder('utf-8');
 
   const tasks: Promise<void>[] = [];
   src.forEach((path, entry) => {
     if (entry.dir) return;
     if (manifestPath && path === manifestPath) return; // patched below
     if (edits?.removed.has(path)) return; // page removed by the editor
-    const pageTextEdits = textEdits.get(path);
     if (edits?.rewrites.has(path)) {
       // page already rewritten by nav surgery — apply text edits on top of it
       let content = edits.rewrites.get(path)!;
-      if (pageTextEdits) content = applyTextEdits(content, pageTextEdits).source;
+      if (textEdits.length && isHtml(path)) content = applyTextEdits(content, textEdits).source;
       out.file(path, content);
       return;
     }
-    if (pageTextEdits) {
+    if (textEdits.length && isHtml(path)) {
       tasks.push(
-        entry.async('string').then((str) => {
-          out.file(path, applyTextEdits(str, pageTextEdits).source);
+        entry.async('uint8array').then((data) => {
+          const r = applyTextEdits(decoder.decode(data), textEdits);
+          // keep unchanged pages byte-identical; only rewrite pages we actually touched
+          out.file(path, r.applied.length ? r.source : data);
         }),
       );
       return;

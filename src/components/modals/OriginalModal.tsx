@@ -16,7 +16,7 @@ export function OriginalModal() {
   const launchHref = usePreview((s) => s.launchHref);
   const tool = useCourse((s) => s.course.meta.authoringTool);
   // total recorded text edits across the course (for the header counter)
-  const editCount = useCourse((s) => s.course.slides.reduce((n, sl) => n + (sl.sourceEdits?.text?.length ?? 0), 0));
+  const editCount = useCourse((s) => s.course.textEdits?.length ?? 0);
   const close = () => setModal(null);
 
   const [editing, setEditing] = useState(false);
@@ -30,20 +30,11 @@ export function OriginalModal() {
   }, [editing]);
 
   // Stable handlers (read the store directly) so toggling edits doesn't thrash the iframe.
-  const getEdits = useCallback((pageHref: string): InlineEdit[] => {
-    const slide = useCourse.getState().course.slides.find((s) => s.sourceHref === pageHref);
-    return slide?.sourceEdits?.text ?? [];
-  }, []);
+  const getEdits = useCallback((): InlineEdit[] => useCourse.getState().course.textEdits ?? [], []);
 
-  const onEdit = useCallback((pageHref: string, elementId: string, from: string, to: string) => {
-    const slide = useCourse.getState().course.slides.find((s) => s.sourceHref === pageHref);
-    if (!slide) {
-      useUi.getState().flash('This page isn’t a slide — edit skipped');
-      return;
-    }
-    if (to.trim() === from.trim()) return;
-    useCourse.getState().setSourceTextEdit(slide.id, elementId, from, to);
-    useUi.getState().flash('Text edited — applies on Faithful export');
+  const onEdit = useCallback((elementId: string, from: string, to: string) => {
+    useCourse.getState().setTextEdit(elementId, from, to);
+    useUi.getState().flash(to.trim() === from.trim() ? 'Reverted to original' : 'Text edited — applies on Faithful export');
   }, []);
 
   return (

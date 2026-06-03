@@ -107,10 +107,10 @@ export interface CourseStore {
   patchSlide: (slideId: string, patch: Partial<Slide>) => void;
   patchBlock: (slideId: string, blockId: string, patch: Partial<Block>) => void;
 
-  /** Record an in-place text edit on an imported page element (Lectora etc.).
-   *  Re-editing the same element updates the existing entry; setting `to` back to
-   *  the original `from` clears it. */
-  setSourceTextEdit: (slideId: string, elementId: string, from: string, to: string) => void;
+  /** Record an in-place text edit on an imported page element (Lectora etc.),
+   *  keyed by element id (globally unique). Re-editing the same element updates the
+   *  entry; setting `to` back to the original `from` clears it. */
+  setTextEdit: (elementId: string, from: string, to: string) => void;
 
   /** Insert a new slide of `type` after `afterId`; returns the new slide id. */
   addSlideAfter: (type: SlideType, afterId: string) => string;
@@ -178,24 +178,13 @@ export const useCourse = create<CourseStore>((set, get) => ({
       ),
     })),
 
-  setSourceTextEdit: (slideId, elementId, from, to) =>
-    get().commit((c) => ({
-      ...c,
-      slides: c.slides.map((s) => {
-        if (s.id !== slideId) return s;
-        const existing = s.sourceEdits?.text ?? [];
-        const others = existing.filter((e) => e.elementId !== elementId);
-        // dropping the edit (text returned to original) → remove the entry
-        const next = to.trim() === from.trim() ? others : [...others, { elementId, from, to }];
-        const text = next.length ? next : undefined;
-        const sourceEdits = text ? { ...s.sourceEdits, text } : (() => {
-          const rest = { ...s.sourceEdits };
-          delete rest.text;
-          return Object.keys(rest).length ? rest : undefined;
-        })();
-        return { ...s, sourceEdits };
-      }),
-    })),
+  setTextEdit: (elementId, from, to) =>
+    get().commit((c) => {
+      const others = (c.textEdits ?? []).filter((e) => e.elementId !== elementId);
+      // dropping the edit (text returned to original) → remove the entry
+      const next = to.trim() === from.trim() ? others : [...others, { elementId, from, to }];
+      return { ...c, textEdits: next.length ? next : undefined };
+    }),
 
   addSlideAfter: (type, afterId) => {
     const label = SLIDE_TYPES.find((x) => x.id === type)?.label ?? 'New';

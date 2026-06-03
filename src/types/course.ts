@@ -130,11 +130,6 @@ export interface SourceTextEdit {
   to: string;
 }
 
-/** Edits applied directly to an imported page's source on faithful export. */
-export interface SourceEdits {
-  text?: SourceTextEdit[];
-}
-
 // ---- Slide ----
 
 export interface Slide {
@@ -150,8 +145,6 @@ export interface Slide {
   rawImported?: boolean;
   /** package-relative path of the original imported page (for the "View Original" iframe) */
   sourceHref?: string;
-  /** in-place edits to the original page source, applied on faithful export */
-  sourceEdits?: SourceEdits;
 }
 
 // ---- Course meta + root ----
@@ -177,6 +170,11 @@ export interface CourseMeta {
 export interface Course {
   meta: CourseMeta;
   slides: Slide[];
+  /** in-place text edits to original page source, keyed by element id (which is
+   *  globally unique in a Lectora title). Applied on faithful export to every
+   *  source page that contains the element — so shared chrome (e.g. a copyright
+   *  line repeated on every page) and single-page (titlemgr) builds both work. */
+  textEdits?: SourceTextEdit[];
 }
 
 // ---- Supporting reference data ----
