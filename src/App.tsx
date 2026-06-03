@@ -3,6 +3,7 @@ import { usePrefs, rootThemeVars } from '@/store/prefsStore';
 import { useUi } from '@/store/uiStore';
 import { useCourse } from '@/store/courseStore';
 import { importScorm } from '@/scorm/import';
+import { restoreDraftAsync, saveDraftPackage } from '@/store/draft';
 import { EditorShell } from '@/components/shell/EditorShell';
 import { ImportScreen } from '@/components/modals/ImportScreen';
 import { DevHarness } from '@/dev/DevHarness';
@@ -16,6 +17,12 @@ export function App() {
 
   const demoParam = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('demo') : null;
   const demo = demoParam === 'roundtrip';
+
+  // Finish restoring a saved draft (the package binary + image URLs) after the
+  // synchronous course restore in main.tsx.
+  useEffect(() => {
+    if (!demoParam) restoreDraftAsync();
+  }, [demoParam]);
 
   // Dev hook: ?demo=import loads the bundled fixture straight into the editor.
   useEffect(() => {
@@ -35,6 +42,7 @@ export function App() {
         const { usePreview } = await import('@/store/previewStore');
         const pages = course.slides.map((s) => s.sourceHref).filter((h): h is string => !!h);
         usePreview.getState().setPackage(file, launchHref, pages);
+        saveDraftPackage(file);
         useCourse.getState().load(course);
         useUi.getState().selectSlide(course.slides[Math.min(idx, course.slides.length - 1)].id);
         useUi.getState().setImported(true);

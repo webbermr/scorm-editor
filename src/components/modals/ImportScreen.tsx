@@ -3,6 +3,7 @@ import { Icon } from '@/components/Icon';
 import { useCourse } from '@/store/courseStore';
 import { useUi } from '@/store/uiStore';
 import { usePreview } from '@/store/previewStore';
+import { saveDraftPackage } from '@/store/draft';
 import { SAMPLE_COURSE } from '@/data/sampleCourse';
 import { importScorm, IMPORT_STEPS } from '@/scorm/import';
 
@@ -38,6 +39,7 @@ export function ImportScreen() {
       setStepN(IMPORT_STEPS.length);
       const pages = course.slides.map((s) => s.sourceHref).filter((h): h is string => !!h);
       usePreview.getState().setPackage(file, launchHref, pages);
+      saveDraftPackage(file); // persist the binary so the session survives a reload
       await new Promise((r) => setTimeout(r, 420));
       enter(course);
     } catch (e) {
@@ -59,6 +61,7 @@ export function ImportScreen() {
 
   const loadSample = () => {
     usePreview.getState().clear();
+    saveDraftPackage(null); // sample has no package; drop any stored one
     enter(SAMPLE_COURSE);
   };
 

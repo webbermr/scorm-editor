@@ -3,6 +3,7 @@
 
 import { useCourse } from '@/store/courseStore';
 import { useUi } from '@/store/uiStore';
+import { flushDraft } from '@/store/draft';
 import type { BlockType, SlideType } from '@/types/course';
 
 export function useEditorActions() {
@@ -51,8 +52,9 @@ export function useEditorActions() {
     },
 
     save: () => {
+      flushDraft();
       course.markSaved();
-      ui.flash('Saved to draft');
+      ui.flash('Saved to this browser');
     },
   };
 }

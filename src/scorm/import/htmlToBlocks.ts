@@ -29,7 +29,9 @@ function pickContentRoot(body: HTMLElement): HTMLElement {
   return main ?? body;
 }
 
-type ResolveImg = (src: string) => string | undefined;
+/** Resolve an <img> src to a renderable object-URL plus its package-relative path
+ *  (the path lets the URL be re-created after a reload). */
+type ResolveImg = (src: string) => { url?: string; path?: string } | undefined;
 
 const cleanText = (el: Element): string => (el.textContent ?? '').replace(/\s+/g, ' ').trim();
 
@@ -106,12 +108,13 @@ function mapElement(el: Element, resolveImg: ResolveImg): Block | Block[] | null
 
 function mapImg(img: HTMLImageElement | Element, resolveImg: ResolveImg): Block {
   const rawSrc = img.getAttribute('src') ?? '';
-  const url = resolveImg(rawSrc);
+  const r = resolveImg(rawSrc);
   return {
     id: makeId(),
     type: 'image',
     src: 'generic',
-    url,
+    url: r?.url,
+    ...(r?.path ? { assetPath: r.path } : {}),
     alt: img.getAttribute('alt') ?? '',
   };
 }

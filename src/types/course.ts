@@ -42,6 +42,9 @@ export interface ImageBlock {
   src: ImageKind | string;
   /** true when src is a real image URL (imported / uploaded) rather than a placeholder kind */
   url?: string;
+  /** package-relative path of the source image, so its object-URL can be re-created
+   *  after a reload (object URLs don't survive a page refresh) */
+  assetPath?: string;
   alt?: string;
   caption?: string;
 }

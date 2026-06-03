@@ -2,6 +2,7 @@ import { Icon } from '@/components/Icon';
 import { useCourse } from '@/store/courseStore';
 import { useUi } from '@/store/uiStore';
 import { usePreview } from '@/store/previewStore';
+import { clearDraft } from '@/store/draft';
 import { useEditorActions } from '@/lib/useEditorActions';
 
 export function TopBar() {
@@ -25,7 +26,8 @@ export function TopBar() {
   const resetUi = useUi((s) => s.reset);
 
   const startOver = () => {
-    if (dirty && !window.confirm('Discard the current course and import a new package? Unsaved changes will be lost.')) return;
+    if (!window.confirm('Discard the current course and import a new package? This clears the saved draft in this browser.')) return;
+    void clearDraft();
     usePreview.getState().clear();
     resetUi();
   };

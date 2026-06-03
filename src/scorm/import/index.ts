@@ -130,9 +130,11 @@ export async function importScorm(file: File, onProgress?: ProgressFn): Promise<
         const p = join(htmlDir, clean(src));
         candidate.set(p, await ensureImageUrl(p));
       }
-      const resolveImg = (src: string): string | undefined => {
-        if (!src || /^(https?:|data:)/i.test(src)) return src || undefined;
-        return candidate.get(join(htmlDir, clean(src)));
+      const resolveImg = (src: string) => {
+        if (!src || /^(https?:|data:)/i.test(src)) return src ? { url: src } : undefined;
+        const p = join(htmlDir, clean(src));
+        const url = candidate.get(p);
+        return url ? { url, path: p } : undefined;
       };
       decomp = htmlToBlocks(html, resolveImg);
     }
@@ -246,7 +248,8 @@ export async function importScorm(file: File, onProgress?: ProgressFn): Promise<
       else if (launch) slides.push(makeSlide(item.title, launch.decomp, launchPath)); // raw fallback, still flagged
       else slides.push(headingSlide(item.title));
     } else if (href && IMAGE_RE.test(href)) {
-      const url = await ensureImageUrl(join(manifestDir, href));
+      const imgPath = join(manifestDir, href);
+      const url = await ensureImageUrl(imgPath);
       slides.push({
         id: makeId(),
         type: 'content',
@@ -255,7 +258,7 @@ export async function importScorm(file: File, onProgress?: ProgressFn): Promise<
         duration: '—',
         blocks: [
           { id: makeId(), type: 'heading', text: item.title },
-          { id: makeId(), type: 'image', src: 'generic', url },
+          { id: makeId(), type: 'image', src: 'generic', url, assetPath: imgPath },
         ],
       });
     } else {
