@@ -138,7 +138,7 @@ export function TopBar() {
           disabled={!previewSupported}
           style={{ opacity: previewSupported ? 1 : 0.5 }}
         >
-          <Icon name="eye" size={16} /> Original
+          <Icon name="eye" size={16} /> LMS Preview
         </button>
       )}
       <button className="btn btn-soft" onClick={save}>

@@ -80,6 +80,14 @@ input, textarea, select { font-family: inherit; color: inherit; }
 .topbar .tip::after { bottom: auto; top: calc(100% + 8px); transform: translateX(-50%) translateY(-4px); }
 .topbar .tip:hover::after { transform: translateX(-50%) translateY(0); }
 
+/* rich tooltip — multi-line wrapping box that drops below the element */
+.tip-rich::after {
+  white-space: normal; width: max-content; max-width: 300px;
+  text-align: left; line-height: 1.45; font-weight: 500; letter-spacing: 0;
+  bottom: auto; top: calc(100% + 8px); transform: translateX(-50%) translateY(-4px);
+}
+.tip-rich:hover::after { transform: translateX(-50%) translateY(0); }
+
 /* animations */
 @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 /* riseIn never touches opacity — safe when the animation clock is frozen (content stays visible) */

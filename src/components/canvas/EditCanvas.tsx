@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { TYPE_META } from '@/lib/typeMeta';
 import { useUi } from '@/store/uiStore';
+import { useCourse } from '@/store/courseStore';
 import { usePreview } from '@/store/previewStore';
 import { SlideBody } from './SlideBody';
 import { OriginalView } from '@/components/preview/OriginalView';
@@ -13,8 +14,38 @@ interface Props {
   total: number;
 }
 
+// Authoring tools that render their slides at runtime (so we can only recover text).
+const RUNTIME_TOOLS = new Set([
+  'Lectora',
+  'Articulate',
+  'Articulate Storyline',
+  'Articulate Rise',
+  'Rise 360',
+  'Adobe Captivate',
+  'iSpring',
+  'iSpring Suite',
+  'Elucidat',
+  'Gomo',
+  'dominKnow',
+  'Adapt',
+  'Camtasia',
+  'Easygenerator',
+]);
+
+/** Context for the "partial import" badge, tailored to the detected authoring tool. */
+function partialImportTip(tool?: string): string {
+  if (tool && RUNTIME_TOOLS.has(tool)) {
+    return `Built with ${tool}, which renders each slide at runtime. We recovered the text into editable blocks, but images, audio/narration and the exact layout aren’t captured here — switch to “LMS Preview” to see the complete slide as learners do.`;
+  }
+  if (tool) {
+    return `Some of this ${tool} page couldn’t be turned into editable blocks and is kept read-only. Switch to “LMS Preview” to see the full original.`;
+  }
+  return `Part of this slide couldn’t be fully converted into editable blocks. The text is editable; switch to “LMS Preview” to see the complete original (images, audio, layout).`;
+}
+
 export function EditCanvas({ slide, slideIndex, total }: Props) {
   const selectBlock = useUi((s) => s.selectBlock);
+  const authoringTool = useCourse((s) => s.course.meta.authoringTool);
   const hasFile = usePreview((s) => !!s.file);
   const supported = usePreview((s) => s.supported);
   // an imported package with a source page for this slide → offer the toggle
@@ -51,7 +82,7 @@ export function EditCanvas({ slide, slideIndex, total }: Props) {
             Slide {slideIndex + 1} of {total}
           </span>
           {slide.rawImported && (
-            <span className="badge" style={{ background: 'var(--amber-soft)', color: 'var(--amber)' }}>
+            <span className="badge tip tip-rich" data-tip={partialImportTip(authoringTool)} style={{ background: 'var(--amber-soft)', color: 'var(--amber)', cursor: 'help' }}>
               <Icon name="warning" size={12} /> partial import
             </span>
           )}
@@ -63,12 +94,12 @@ export function EditCanvas({ slide, slideIndex, total }: Props) {
                 </button>
                 <button
                   className={`${view === 'original' && hasOriginal ? 'on' : ''} ${supported ? '' : 'tip'}`}
-                  data-tip={supported ? undefined : 'Original view needs HTTPS or localhost'}
+                  data-tip={supported ? undefined : 'LMS Preview needs HTTPS or localhost'}
                   disabled={!supported}
                   onClick={() => supported && setView('original')}
                   style={{ opacity: supported ? 1 : 0.45, cursor: supported ? 'pointer' : 'default' }}
                 >
-                  <Icon name="eye" size={14} /> Original
+                  <Icon name="eye" size={14} /> LMS Preview
                 </button>
               </div>
             )}

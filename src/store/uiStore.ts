@@ -37,7 +37,7 @@ export const useUi = create<UiStore>((set) => ({
   selectedSlideId: null,
   selectedBlockId: null,
   mode: 'edit',
-  inspectorOpen: true,
+  inspectorOpen: false,
   modal: null,
   replaceTargetBlockId: null,
   previewIndex: 0,

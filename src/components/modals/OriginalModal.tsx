@@ -28,7 +28,7 @@ export function OriginalModal() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 18px', borderBottom: '1px solid var(--line)', background: 'var(--surface-2)' }}>
           <Icon name="eye" size={18} style={{ color: 'var(--accent)' }} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 700 }}>Original course</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 700 }}>LMS Preview — original course</div>
             <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>The imported package, rendered exactly as your LMS would run it.</div>
           </div>
           {launchHref && (
