@@ -20,3 +20,6 @@ services:
     depends_on:
       - scorm-editor
     restart: unless-stopped
+    # Opt-in: only starts with `docker compose --profile tunnel up -d`
+    # (so plain local runs don't need a TUNNEL_TOKEN). Requires .env with the token.
+    profiles: ["tunnel"]

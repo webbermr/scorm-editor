@@ -30,15 +30,15 @@ The app is a static SPA; the image is a multi-stage build (Node builds the Vite
 bundle → nginx serves it).
 
 ```bash
-# build + run with compose (serves on http://localhost:8080)
+# build + run with compose (serves on http://localhost:8081)
 docker compose up --build -d
 
 # …or with plain docker
 docker build -t scorm-editor .
-docker run -d -p 8080:80 --name scorm-editor scorm-editor
+docker run -d -p 8081:80 --name scorm-editor scorm-editor
 ```
 
-Then open **http://localhost:8080**.
+Then open **http://localhost:8081**. (The published port is set in `docker-compose.yml`.)
 
 > **Heads-up — the “View Original” feature needs a secure context.** It relies on a
 > service worker + Cache API, which browsers only allow over **HTTPS** or
@@ -51,6 +51,33 @@ nginx is configured ([`nginx.conf`](./nginx.conf)) to never cache `index.html` /
 `scorm-sw.js` (with `Service-Worker-Allowed: /`), cache hashed `/assets/` immutably,
 and fall back to `index.html`. Build context excludes `node_modules`, `dist`, and
 sample `.zip`s via [`.dockerignore`](./.dockerignore).
+
+### Deploying with Cloudflare Tunnel (trusted HTTPS for remote users)
+Because **“View Original” needs a secure context** (HTTPS or `localhost`), serving the
+container to other devices over plain `http://<ip>` disables it. A
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+gives you a real HTTPS hostname with no port-forwarding and no certificates to install.
+The `cloudflared` connector is already defined in `docker-compose.yml` behind a
+`tunnel` profile.
+
+One-time Cloudflare setup:
+1. Add your domain to Cloudflare (set its nameservers to the ones Cloudflare assigns).
+2. **Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared**, name it, and copy the **token**.
+3. Add a **Public Hostname**: e.g. `scorm.yourdomain.com`, Service **HTTP**, URL **`scorm-editor:80`** (the app's container name + internal port).
+4. *(Recommended)* **Access → Applications → Self-hosted** for that hostname with an email allow-list, so only your people can open it.
+
+On the server:
+```bash
+git clone https://github.com/webbermr/scorm-editor.git
+cd scorm-editor
+echo 'TUNNEL_TOKEN=eyJ...your-tunnel-token...' > .env   # secret; .env is git-ignored
+docker compose --profile tunnel up -d --build            # starts app + tunnel
+docker compose logs -f cloudflared                       # look for "Registered tunnel connection"
+```
+Your users then open `https://scorm.yourdomain.com`. The token lives only in `.env`
+(git-ignored) — never commit it; rotate it by recreating the tunnel if it leaks.
+Plain local runs (`docker compose up -d`, no profile) don't start the tunnel and need
+no token.
 
 ## What's real (not mocked)
 - **SCORM import** — genuine unzip → parse `imsmanifest.xml` → detect 1.2 vs 2004 →
