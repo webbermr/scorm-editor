@@ -1,4 +1,5 @@
 import { Icon } from '@/components/Icon';
+import { HelpTip } from '@/components/ui/HelpTip';
 import { useCourse } from '@/store/courseStore';
 import { useUi } from '@/store/uiStore';
 import { usePreview } from '@/store/previewStore';
@@ -51,45 +52,77 @@ export function TopBar() {
         <div style={{ width: 32, height: 32, borderRadius: 9, background: 'var(--accent)', color: '#fff', display: 'grid', placeItems: 'center' }}>
           <Icon name="logo" size={20} />
         </div>
-        <span style={{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 700, letterSpacing: '-.02em', whiteSpace: 'nowrap' }}>SCORM Editor</span>
+        <span className="topbar-wordmark" style={{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 700, letterSpacing: '-.02em', whiteSpace: 'nowrap' }}>SCORM Editor</span>
       </div>
       <div style={{ width: 1, height: 24, background: 'var(--line)' }} />
 
-      {/* course title (editable) */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-        <input
-          value={meta.title}
-          onChange={(e) => patchMeta({ title: e.target.value })}
-          aria-label="Course title"
-          style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: 15.5,
-            fontWeight: 700,
-            border: '1px solid transparent',
-            background: 'transparent',
-            borderRadius: 8,
-            padding: '5px 9px',
-            width: 'clamp(220px, 30vw, 460px)',
-            color: 'var(--ink)',
-            transition: 'all .15s',
-          }}
-          onFocus={(e) => {
-            e.target.style.background = 'var(--surface-2)';
-            e.target.style.borderColor = 'var(--line)';
-          }}
-          onBlur={(e) => {
-            e.target.style.background = 'transparent';
-            e.target.style.borderColor = 'transparent';
-          }}
-        />
-        <span className="badge badge-mono" style={{ background: 'var(--surface-sunk)', color: 'var(--ink-2)' }}>
-          SCORM {meta.scormVersion}
-        </span>
-        {meta.authoringTool && (
-          <span className="badge tip" data-tip="Authoring tool detected on import" style={{ background: 'var(--accent-soft)', color: 'var(--accent-ink)' }}>
-            <Icon name="layers" size={12} /> {meta.authoringTool}
+      {/* course title (editable), with the imported package's file name beneath */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: '0 1 auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
+            <input
+              value={meta.title}
+              onChange={(e) => patchMeta({ title: e.target.value })}
+              aria-label="Course title"
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontSize: 15.5,
+                fontWeight: 700,
+                border: '1px solid transparent',
+                background: 'transparent',
+                borderRadius: 8,
+                padding: '2px 9px',
+                width: 'clamp(220px, 30vw, 460px)',
+                minWidth: 0, // shrink with the window rather than overlap the toolbar
+                color: 'var(--ink)',
+                transition: 'all .15s',
+              }}
+              onFocus={(e) => {
+                e.target.style.background = 'var(--surface-2)';
+                e.target.style.borderColor = 'var(--line)';
+              }}
+              onBlur={(e) => {
+                e.target.style.background = 'transparent';
+                e.target.style.borderColor = 'transparent';
+              }}
+            />
+            <HelpTip label="Course title">
+              <p>
+                This is the course title from the package’s <strong>imsmanifest.xml</strong>, set when the course was published. If the manifest has no
+                title, the .zip file name is used instead.
+              </p>
+              <p>Click the title to change it. On export, the new title is written into the manifest, which is the name your LMS shows for the course.</p>
+              <p>The file name underneath is the .zip you imported. Changing the title doesn’t rename it; you choose the export file name when you export.</p>
+            </HelpTip>
+          </div>
+          {meta.package && (
+            <span
+              title={meta.package}
+              style={{
+                padding: '0 10px',
+                fontSize: 11.5,
+                color: 'var(--ink-3)',
+                fontFamily: 'var(--font-mono)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: 'clamp(220px, 30vw, 460px)',
+              }}
+            >
+              {meta.package}
+            </span>
+          )}
+        </div>
+        <div className="topbar-badges">
+          <span className="badge badge-mono" style={{ background: 'var(--surface-sunk)', color: 'var(--ink-2)' }}>
+            SCORM {meta.scormVersion}
           </span>
-        )}
+          {meta.authoringTool && (
+            <span className="badge tip" data-tip="Authoring tool detected on import" style={{ background: 'var(--accent-soft)', color: 'var(--accent-ink)' }}>
+              <Icon name="layers" size={12} /> {meta.authoringTool}
+            </span>
+          )}
+        </div>
       </div>
 
       <div style={{ flex: 1 }} />

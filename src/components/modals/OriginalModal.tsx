@@ -6,6 +6,8 @@ import { useCourse } from '@/store/courseStore';
 import { usePreview } from '@/store/previewStore';
 import { WRAPPER_PAGE } from '@/scorm/preview/fileServer';
 import type { InlineEdit } from '@/scorm/preview/inlineTextEdit';
+import type { OverlayChanges } from '@/types/course';
+import { overlayNote } from '@/lib/overlayNote';
 
 // Full-screen faithful render of the original imported course (its launcher),
 // running the real package HTML/CSS/JS exactly as an LMS would. With "Edit text"
@@ -32,9 +34,10 @@ export function OriginalModal() {
   // Stable handlers (read the store directly) so toggling edits doesn't thrash the iframe.
   const getEdits = useCallback((): InlineEdit[] => useCourse.getState().course.textEdits ?? [], []);
 
-  const onEdit = useCallback((elementId: string, from: string, to: string) => {
-    useCourse.getState().setTextEdit(elementId, from, to);
-    useUi.getState().flash(to.trim() === from.trim() ? 'Reverted to original' : 'Text edited — applies on Faithful export');
+  const onEdit = useCallback((elementId: string, from: string, to: string, overlays?: OverlayChanges) => {
+    useCourse.getState().setTextEdit(elementId, from, to, overlays);
+    const links = overlayNote(overlays);
+    useUi.getState().flash(to.trim() === from.trim() ? 'Reverted to original' : `Text edited${links} — applies on Faithful export`);
   }, []);
 
   return (

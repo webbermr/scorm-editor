@@ -79,6 +79,11 @@ export async function importScorm(file: File, onProgress?: ProgressFn): Promise<
     if (IMAGE_RE.test(path)) imageFiles.push(path);
   });
   const authoringTool = detectAuthoringTool(manifestXml, allPaths);
+  // Lectora pages are all real, navigable pages (Next buttons chain through every
+  // one), so each must be a slide — even one whose only text is shared player
+  // chrome (e.g. a video page). A page hidden from the editor can't be deleted,
+  // yet an export that removes its neighbours will re-route navigation onto it.
+  const everyPageIsASlide = authoringTool === 'Lectora';
 
   // 3) Map items → slides
   report(2);
@@ -164,7 +169,7 @@ export async function importScorm(file: File, onProgress?: ProgressFn): Promise<
       for (const dep of r.dependencies) walk(dep);
     };
     walk(rootId);
-    return out.slice(0, 300); // backstop against pathological packages
+    return out.slice(0, 5000); // backstop against pathological packages (real courses reach ~600 pages)
   };
 
   const prettyName = (path: string): string => {
@@ -241,7 +246,7 @@ export async function importScorm(file: File, onProgress?: ProgressFn): Promise<
         }
         const name = pageName(p);
         const runs = runtimeRuns[i].filter((r) => !chrome.has(r) && r !== name);
-        if (runs.length) built.push(recoveredSlide(name, runs, p.path));
+        if (runs.length || everyPageIsASlide) built.push(recoveredSlide(name, runs, p.path));
       });
 
       if (built.length) slides.push(...built);

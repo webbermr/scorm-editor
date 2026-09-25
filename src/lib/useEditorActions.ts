@@ -12,6 +12,17 @@ export function useEditorActions() {
 
   const currentSlideId = () => ui.selectedSlideId ?? course.course.slides[0]?.id ?? '';
 
+  const deleteSlide = (id: string) => {
+    const next = course.deleteSlide(id);
+    if (next === null) {
+      ui.flash('Can’t delete the last slide');
+      return;
+    }
+    if (id === ui.selectedSlideId) ui.selectSlide(next);
+    ui.setCheckedSlides(ui.checkedSlideIds.filter((x) => x !== id));
+    ui.flash('Slide deleted');
+  };
+
   return {
     addSlide: (type: SlideType) => {
       const id = course.addSlideAfter(type, currentSlideId());
@@ -23,14 +34,21 @@ export function useEditorActions() {
       ui.flash('Slide added');
     },
 
-    deleteSlide: (id: string) => {
-      const next = course.deleteSlide(id);
-      if (next === null) {
-        ui.flash('Can’t delete the last slide');
+    deleteSlide,
+
+    deleteSlides: (ids: string[]) => {
+      if (ids.length <= 1) {
+        if (ids[0]) deleteSlide(ids[0]);
         return;
       }
-      if (id === ui.selectedSlideId) ui.selectSlide(next);
-      ui.flash('Slide deleted');
+      const next = course.deleteSlides(ids);
+      if (next === null) {
+        ui.flash('Can’t delete every slide');
+        return;
+      }
+      if (ids.includes(ui.selectedSlideId ?? '')) ui.selectSlide(next);
+      ui.setCheckedSlides([]);
+      ui.flash(`${ids.length} slides deleted`);
     },
 
     duplicateSlide: (id: string) => {

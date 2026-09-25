@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Icon } from '@/components/Icon';
 import { usePreview } from '@/store/previewStore';
 import { setupInlineTextEdit, type InlineEdit, type InlineEditController, type PickInfo } from '@/scorm/preview/inlineTextEdit';
+import type { OverlayChanges } from '@/types/course';
 
 interface ActiveEdit {
   elementId: string;
@@ -25,7 +26,7 @@ interface Props {
   /** existing text edits (course-wide, keyed by element id) */
   getEdits?: () => InlineEdit[];
   /** report a finished text edit */
-  onEdit?: (elementId: string, from: string, to: string) => void;
+  onEdit?: (elementId: string, from: string, to: string, overlays?: OverlayChanges) => void;
 }
 
 // Renders an imported package's original page in an iframe served by the in-app
@@ -125,7 +126,11 @@ export function OriginalView({ href, style, title = 'Original page', fill = fals
     editCtrlRef.current?.applyText(a.elementId, value);
     editCtrlRef.current?.markEdited(a.elementId, value !== a.from.trim());
     editCtrlRef.current?.setActive(null);
-    onEdit?.(a.elementId, a.from, value);
+    // links laid over the text follow their words, or go with them if they were
+    // removed (measured on the live page)
+    const overlays = value === a.from.trim() ? {} : (editCtrlRef.current?.overlayChanges(a.elementId) ?? {});
+    onEdit?.(a.elementId, a.from, value, overlays);
+    editCtrlRef.current?.refreshOverlays();
     setActive(null);
   }, [onEdit]);
 

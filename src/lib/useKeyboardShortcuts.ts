@@ -1,5 +1,5 @@
 // Global keyboard shortcuts: ⌘/Ctrl+Z / ⇧+Z undo-redo, ⌘/Ctrl+S save,
-// ←/→ to navigate slides in Preview. (Esc-to-close is handled per-modal.)
+// ←/→ to navigate slides in Preview, Delete/Esc on ticked slides.
 
 import { useEffect } from 'react';
 import { useCourse } from '@/store/courseStore';
@@ -37,6 +37,27 @@ export function useKeyboardShortcuts() {
         e.preventDefault();
         course.redo();
         return;
+      }
+
+      // Ticked slides: Delete/Backspace removes them, Esc unticks them. Only acts on
+      // ticked slides, so a stray Backspace never drops the slide being edited.
+      if ((e.key === 'Delete' || e.key === 'Backspace' || e.key === 'Escape') && ui.mode === 'edit' && !ui.modal && !isEditableTarget(e.target)) {
+        const ids = course.course.slides.filter((s) => ui.checkedSlideIds.includes(s.id)).map((s) => s.id);
+        if (ids.length) {
+          e.preventDefault();
+          if (e.key === 'Escape') {
+            ui.setCheckedSlides([]);
+            return;
+          }
+          const next = course.deleteSlides(ids);
+          if (next === null) ui.flash('Can’t delete every slide');
+          else {
+            if (ids.includes(ui.selectedSlideId ?? '')) ui.selectSlide(next);
+            ui.setCheckedSlides([]);
+            ui.flash(ids.length === 1 ? 'Slide deleted' : `${ids.length} slides deleted`);
+          }
+          return;
+        }
       }
 
       // Preview navigation with arrow keys

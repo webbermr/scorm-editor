@@ -263,6 +263,7 @@ async function buildOriginalPackage(course: Course, opts: ExportOptions, origina
     if (entry.dir) return;
     if (manifestPath && path === manifestPath) return; // patched below
     if (edits?.removed.has(path)) return; // page removed by the editor
+    if (path === 'scorm-editor/slides.json') return; // stale slide list from older exports
     if (edits?.rewrites.has(path)) {
       // page already rewritten by nav surgery — apply text edits on top of it
       let content = edits.rewrites.get(path)!;
@@ -311,6 +312,7 @@ async function buildOriginalPackage(course: Course, opts: ExportOptions, origina
   // Validate the re-packaged source — especially important after Lectora page
   // surgery, which rewrites navigation and prunes manifest <file> entries.
   const report = await validatePackage(out, { expectedVersion: course.meta.scormVersion });
+  for (const w of edits?.warnings ?? []) report.warnings.push({ level: 'warning', code: 'lectora-delete', message: w.message, detail: w.detail });
 
   const blob = await out.generateAsync({
     type: 'blob',

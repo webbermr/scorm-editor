@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { Modal, ModalHead } from './Modal';
 import { Toggle } from '@/components/ui/Toggle';
+import { HelpTip } from '@/components/ui/HelpTip';
 import { useCourse } from '@/store/courseStore';
 import { useUi } from '@/store/uiStore';
 import { usePreview } from '@/store/previewStore';
@@ -24,11 +25,67 @@ const MODE_OPTIONS: Array<{ id: Mode; label: string; desc: string }> = [
   },
 ];
 
-const OPTION_ROWS: Array<['manifest' | 'minify' | 'includeSource', string]> = [
-  ['manifest', 'Regenerate imsmanifest.xml'],
-  ['minify', 'Minify HTML & assets'],
-  ['includeSource', 'Include editable source files'],
+// Help text shown behind the (i) next to each export setting.
+const MODE_HELP = (
+  <>
+    <p>
+      <strong>Faithful copy</strong> creates a copy of the original package with the same player, design, images, audio and narration. Only these edits
+      are applied:
+    </p>
+    <ul>
+      <li>Text changed with “Edit text” in LMS Preview (Lectora courses)</li>
+      <li>Deleted slides (Lectora courses only; other tools export every page)</li>
+      <li>Course title, and passing score if the original package sets one</li>
+    </ul>
+    <p>
+      Changes made in the Blocks view, reordering and new slides are <strong>not</strong> included.
+    </p>
+    <p>
+      <strong>Rebuilt</strong> creates a new course with one simple page per slide, using your Blocks-view text, slide order and new slides, plus the
+      images and narration taken from the original pages. “Edit text” changes aren’t carried over. It’s ready for any LMS but looks plain, not like
+      the original.
+    </p>
+  </>
+);
+
+const NAME_HELP = (
+  <p>
+    The name of the downloaded .zip file. It doesn’t change the course title learners see in the LMS; edit that in the title field at the top of the
+    editor.
+  </p>
+);
+
+const VERSION_HELP = (
+  <>
+    <p>The SCORM standard your LMS uses to launch the course and record completion and scores.</p>
+    <p>
+      <strong>SCORM 1.2</strong> works in almost every LMS. Choose <strong>SCORM 2004</strong> only if your LMS requires it.
+    </p>
+    <p>A Faithful copy always keeps the version of the original package.</p>
+  </>
+);
+
+const OPTION_ROWS: Array<['manifest' | 'minify' | 'includeSource', string, React.ReactNode]> = [
+  ['manifest', 'Regenerate imsmanifest.xml', null],
+  [
+    'minify',
+    'Maximum compression',
+    <p key="m">
+      Compresses the .zip as much as possible so it uploads faster. The course itself is unchanged. Images and audio are already compressed, so the file
+      usually shrinks only a little.
+    </p>,
+  ],
+  [
+    'includeSource',
+    'Include editor data (course.json)',
+    <>
+      <p>Adds a course.json file with the editor’s copy of your slides and course settings, for your records or other tools.</p>
+      <p>The LMS ignores it, and importing the package here again does not read it, so it won’t restore your edits.</p>
+    </>,
+  ],
 ];
+
+const labelRow = { display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 } as const;
 
 export function ExportModal() {
   const course = useCourse((s) => s.course);
@@ -86,8 +143,13 @@ export function ExportModal() {
         <div style={{ padding: 22 }}>
           {hasOriginal && (
             <div style={{ marginBottom: 16 }}>
-              <label className="field-label">What to export</label>
-              <select className="field" value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
+              <div style={labelRow}>
+                <label className="field-label" htmlFor="export-mode" style={{ marginBottom: 0 }}>
+                  What to export
+                </label>
+                <HelpTip label="What to export">{MODE_HELP}</HelpTip>
+              </div>
+              <select id="export-mode" className="field" value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
                 {MODE_OPTIONS.map((o) => (
                   <option key={o.id} value={o.id}>
                     {o.label}
@@ -99,14 +161,24 @@ export function ExportModal() {
           )}
 
           <div style={{ marginBottom: 16 }}>
-            <label className="field-label">Package name</label>
+            <div style={labelRow}>
+              <label className="field-label" htmlFor="export-name" style={{ marginBottom: 0 }}>
+                Package name
+              </label>
+              <HelpTip label="Package name">{NAME_HELP}</HelpTip>
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
-              <input className="field" value={name} onChange={(e) => setName(e.target.value)} style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }} />
+              <input id="export-name" className="field" value={name} onChange={(e) => setName(e.target.value)} style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }} />
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--ink-3)', padding: '9px 12px', border: '1px solid var(--line)', borderLeft: 'none', borderRadius: '0 var(--r-md) var(--r-md) 0', background: 'var(--surface-sunk)' }}>.zip</span>
             </div>
           </div>
           <div style={{ marginBottom: 16 }}>
-            <label className="field-label">SCORM version{mode === 'original' ? ' (kept from source)' : ''}</label>
+            <div style={labelRow}>
+              <span className="field-label" style={{ marginBottom: 0 }}>
+                SCORM version{mode === 'original' ? ' (kept from source)' : ''}
+              </span>
+              <HelpTip label="SCORM version">{VERSION_HELP}</HelpTip>
+            </div>
             <div className="seg" style={{ width: '100%', opacity: mode === 'original' ? 0.55 : 1 }}>
               {([['1.2', 'SCORM 1.2'], ['2004', 'SCORM 2004']] as const).map(([v, lbl]) => (
                 <button key={v} className={effectiveVersion === v ? 'on' : ''} style={{ flex: 1, justifyContent: 'center' }} disabled={mode === 'original'} onClick={() => setVersion(v)}>
@@ -117,9 +189,12 @@ export function ExportModal() {
           </div>
           <label className="field-label">Options</label>
           <div className="card" style={{ padding: '4px 14px', marginBottom: 18 }}>
-            {OPTION_ROWS.filter(([k]) => k !== 'manifest').map(([k, lbl], i, arr) => (
+            {OPTION_ROWS.filter(([k]) => k !== 'manifest').map(([k, lbl, help], i, arr) => (
               <div key={k} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--line)' : 'none' }}>
-                <span style={{ fontSize: 13.5 }}>{lbl}</span>
+                <span style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {lbl}
+                  {help && <HelpTip label={lbl}>{help}</HelpTip>}
+                </span>
                 <Toggle on={opts[k]} onChange={() => setOpts((o) => ({ ...o, [k]: !o[k] }))} />
               </div>
             ))}

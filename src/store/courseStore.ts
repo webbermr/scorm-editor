@@ -4,7 +4,7 @@
 import { create } from 'zustand';
 import { makeId } from '@/lib/id';
 import { SLIDE_TYPES } from '@/data/reference';
-import type { Block, BlockType, Course, Slide, SlideType } from '@/types/course';
+import type { Block, BlockType, Course, OverlayChanges, Slide, SlideType } from '@/types/course';
 
 const HISTORY_CAP = 40;
 
@@ -110,12 +110,15 @@ export interface CourseStore {
   /** Record an in-place text edit on an imported page element (Lectora etc.),
    *  keyed by element id (globally unique). Re-editing the same element updates the
    *  entry; setting `to` back to the original `from` clears it. */
-  setTextEdit: (elementId: string, from: string, to: string) => void;
+  setTextEdit: (elementId: string, from: string, to: string, overlays?: OverlayChanges) => void;
 
   /** Insert a new slide of `type` after `afterId`; returns the new slide id. */
   addSlideAfter: (type: SlideType, afterId: string) => string;
   /** Returns the id that should be selected next, or null if deletion was blocked (last slide). */
   deleteSlide: (slideId: string) => string | null;
+  /** Delete several slides as one undo step. Returns the id to select next, or null
+   *  if blocked (it would remove every slide). */
+  deleteSlides: (slideIds: string[]) => string | null;
   /** Returns the new slide id. */
   duplicateSlide: (slideId: string) => string;
   reorder: (from: number, to: number) => void;
@@ -178,11 +181,18 @@ export const useCourse = create<CourseStore>((set, get) => ({
       ),
     })),
 
-  setTextEdit: (elementId, from, to) =>
+  setTextEdit: (elementId, from, to, overlays) =>
     get().commit((c) => {
       const others = (c.textEdits ?? []).filter((e) => e.elementId !== elementId);
       // dropping the edit (text returned to original) → remove the entry
-      const next = to.trim() === from.trim() ? others : [...others, { elementId, from, to }];
+      const edit = {
+        elementId,
+        from,
+        to,
+        ...(overlays?.hideObjects?.length ? { hideObjects: overlays.hideObjects } : {}),
+        ...(overlays?.moveObjects && Object.keys(overlays.moveObjects).length ? { moveObjects: overlays.moveObjects } : {}),
+      };
+      const next = to.trim() === from.trim() ? others : [...others, edit];
       return { ...c, textEdits: next.length ? next : undefined };
     }),
 
@@ -211,6 +221,18 @@ export const useCourse = create<CourseStore>((set, get) => ({
     const idx = slides.findIndex((s) => s.id === slideId);
     const nextSelect = slides[Math.max(0, idx - 1)].id;
     get().commit((c) => ({ ...c, slides: c.slides.filter((s) => s.id !== slideId) }));
+    return nextSelect;
+  },
+
+  deleteSlides: (slideIds) => {
+    const drop = new Set(slideIds);
+    const slides = get().course.slides;
+    if (slides.every((s) => drop.has(s.id))) return null;
+    // select the nearest surviving slide before the first deleted one (else after)
+    const first = slides.findIndex((s) => drop.has(s.id));
+    const before = slides.slice(0, Math.max(0, first)).reverse().find((s) => !drop.has(s.id));
+    const nextSelect = (before ?? slides.find((s) => !drop.has(s.id)))!.id;
+    get().commit((c) => ({ ...c, slides: c.slides.filter((s) => !drop.has(s.id)) }));
     return nextSelect;
   },
 

@@ -21,9 +21,29 @@ export function Navigator() {
   const slides = useCourse((s) => s.course.slides);
   const reorder = useCourse((s) => s.reorder);
   const selectedId = useUi((s) => s.selectedSlideId);
+  const checkedIds = useUi((s) => s.checkedSlideIds);
   const selectSlide = useUi((s) => s.selectSlide);
+  const toggleSlideCheck = useUi((s) => s.toggleSlideCheck);
+  const checkSlideRange = useUi((s) => s.checkSlideRange);
+  const setCheckedSlides = useUi((s) => s.setCheckedSlides);
   const setModal = useUi((s) => s.setModal);
-  const { deleteSlide, duplicateSlide } = useEditorActions();
+  const { deleteSlide, deleteSlides, duplicateSlide } = useEditorActions();
+
+  // ignore ids that no longer exist (e.g. after undo/redo)
+  const checked = new Set(checkedIds.filter((id) => slides.some((s) => s.id === id)));
+  const anyChecked = checked.size > 0;
+  const orderedChecked = () => slides.filter((s) => checked.has(s.id)).map((s) => s.id);
+
+  const onSelect = (id: string, e: React.MouseEvent) => {
+    if (e.shiftKey) checkSlideRange(id, slides.map((s) => s.id));
+    else if (e.metaKey || e.ctrlKey) {
+      // first ⌘-click also ticks the slide being edited, like extending a selection
+      if (!anyChecked && selectedId && selectedId !== id) setCheckedSlides([selectedId, id]);
+      else toggleSlideCheck(id);
+    } else selectSlide(id);
+  };
+  // a card's trash button removes all ticked slides when that card is ticked
+  const onDelete = (id: string) => (checked.has(id) ? deleteSlides(orderedChecked()) : deleteSlide(id));
 
   const [overId, setOverId] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -69,6 +89,37 @@ export function Navigator() {
         </button>
       </div>
 
+      {anyChecked && (
+        <div
+          role="toolbar"
+          aria-label="Selected slides"
+          style={{
+            margin: '0 10px 10px',
+            padding: '6px 6px 6px 12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            borderRadius: 'var(--r-md)',
+            background: 'var(--accent-soft)',
+            fontSize: 12.5,
+            fontWeight: 600,
+          }}
+        >
+          <span style={{ flex: 1 }}>{checked.size} selected</span>
+          {checked.size < slides.length && (
+            <button className="btn btn-sm btn-ghost" onClick={() => setCheckedSlides(slides.map((s) => s.id))}>
+              All
+            </button>
+          )}
+          <button className="btn btn-sm btn-ghost" onClick={() => setCheckedSlides([])}>
+            Clear
+          </button>
+          <button className="btn btn-sm btn-danger" onClick={() => deleteSlides(orderedChecked())}>
+            <Icon name="trash" size={14} /> Delete
+          </button>
+        </div>
+      )}
+
       {/* progress bar */}
       <div style={{ padding: '0 16px 12px' }}>
         <div style={{ height: 5, borderRadius: 99, background: 'var(--surface-sunk)', overflow: 'hidden' }}>
@@ -105,9 +156,12 @@ export function Navigator() {
                   slide={slide}
                   index={i}
                   selected={slide.id === selectedId}
+                  checked={checked.has(slide.id)}
+                  multi={anyChecked}
                   dropBefore={overId === slide.id && activeId !== null && activeId !== slide.id}
-                  onSelect={selectSlide}
-                  onDelete={deleteSlide}
+                  onSelect={onSelect}
+                  onToggle={toggleSlideCheck}
+                  onDelete={onDelete}
                   onDuplicate={duplicateSlide}
                 />
               ))}

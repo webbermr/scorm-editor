@@ -124,7 +124,18 @@ export interface Scenario {
 
 /** A text change to a runtime-rendered element, keyed by its source element id
  *  (e.g. "text236596"). `from` is the original visible text; `to` is the new. */
-export interface SourceTextEdit {
+/** What a text edit does to the clickable objects laid over that text (e.g. the
+ *  invisible hotspot buttons on "Home | Resources | SAVE & EXIT"). */
+export interface OverlayChanges {
+  /** overlays whose words were deleted — switched off so a deleted link doesn't
+   *  stay live over empty space */
+  hideObjects?: string[];
+  /** overlays whose words moved (text before them was deleted or changed) — shifted
+   *  by dx/dy page px from their original position so they stay on their words */
+  moveObjects?: Record<string, { dx: number; dy: number }>;
+}
+
+export interface SourceTextEdit extends OverlayChanges {
   elementId: string;
   from: string;
   to: string;

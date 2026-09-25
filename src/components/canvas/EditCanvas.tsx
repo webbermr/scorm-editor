@@ -7,7 +7,8 @@ import { usePreview } from '@/store/previewStore';
 import { SlideBody } from './SlideBody';
 import { OriginalView } from '@/components/preview/OriginalView';
 import type { InlineEdit } from '@/scorm/preview/inlineTextEdit';
-import type { Slide } from '@/types/course';
+import type { OverlayChanges, Slide } from '@/types/course';
+import { overlayNote } from '@/lib/overlayNote';
 
 interface Props {
   slide: Slide;
@@ -66,9 +67,10 @@ export function EditCanvas({ slide, slideIndex, total }: Props) {
 
   // Stable handlers (read the store directly) — course-wide edits keyed by element id.
   const getEdits = useCallback((): InlineEdit[] => useCourse.getState().course.textEdits ?? [], []);
-  const onEdit = useCallback((elementId: string, from: string, to: string) => {
-    useCourse.getState().setTextEdit(elementId, from, to);
-    useUi.getState().flash(to.trim() === from.trim() ? 'Reverted to original' : 'Text edited — applies on Faithful export');
+  const onEdit = useCallback((elementId: string, from: string, to: string, overlays?: OverlayChanges) => {
+    useCourse.getState().setTextEdit(elementId, from, to, overlays);
+    const links = overlayNote(overlays);
+    useUi.getState().flash(to.trim() === from.trim() ? 'Reverted to original' : `Text edited${links} — applies on Faithful export`);
   }, []);
 
   return (
