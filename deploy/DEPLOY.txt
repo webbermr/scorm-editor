@@ -1,0 +1,30 @@
+SCORM Editor - prebuilt deploy package
+======================================
+This folder runs the already-built app with the standard nginx image.
+Nothing is built on this machine, so it works on any CPU type.
+
+  site/               the built app (same files as the other host serves)
+  nginx.conf          web server config
+  docker-compose.yml  app on port 8081 + optional Cloudflare tunnel
+  .env                NOT included - holds TUNNEL_TOKEN=... (copy it in)
+
+FIRST TIME (replacing a deployment that was built from source)
+  1. Stop the old containers (they use the same names):
+       docker rm -f scorm-editor scorm-editor-tunnel
+  2. Extract this zip and go into the folder:
+       unzip scorm-editor-deploy-<commit>.zip && cd scorm-editor-deploy
+  3. Copy in the tunnel token from the old deployment:
+       cp /path/to/old/scorm-editor/.env .
+  4. Start the app and the tunnel:
+       docker compose --profile tunnel up -d
+
+UPDATING (with a newer package)
+  Replace the site folder with the new package's site folder, then:
+       docker compose --profile tunnel up -d
+  (Or extract the new zip over this folder - your .env is kept.)
+
+CHECK
+  docker ps                                   -> scorm-editor should be "healthy"
+  curl -s localhost:8081/build-info.json      -> build time of these files
+  curl -s localhost:8081/ | grep -o 'assets/index-[^"]*\.js'
+                                              -> must match the other host
