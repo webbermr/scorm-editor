@@ -50,6 +50,23 @@ export async function findTestPassphrase(zip: JSZip): Promise<string | null> {
   return null;
 }
 
+/** Whether the package's Lectora test definitions (_tobj*.xml/.txt) are encrypted,
+ *  and if so whether the course's own player key unlocks them. */
+export async function testEncryption(zip: JSZip): Promise<'none' | 'unlocked' | 'locked'> {
+  const tests: string[] = [];
+  zip.forEach((p, e) => {
+    if (!e.dir && /(^|\/)_tobj[^/]*\.(xml|txt)$/i.test(p)) tests.push(p);
+  });
+  const encrypted: string[] = [];
+  for (const p of tests) {
+    const raw = await zip.file(p)!.async('string');
+    if (/^\s*U2FsdGVkX1/.test(raw)) encrypted.push(raw);
+  }
+  if (!encrypted.length) return 'none';
+  const passphrase = await findTestPassphrase(zip);
+  return passphrase && encrypted.every((raw) => decryptTest(raw, passphrase)) ? 'unlocked' : 'locked';
+}
+
 /** Decrypt a test object; returns the XML, or null if the passphrase doesn't fit. */
 export function decryptTest(cipher: string, passphrase: string): string | null {
   try {

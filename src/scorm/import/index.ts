@@ -7,6 +7,7 @@ import { parseManifest, type ParsedManifest } from './parseManifest';
 import { htmlToBlocks, type DecomposeResult } from './htmlToBlocks';
 import { recoverRuntimeText, sharedChrome } from './recoverText';
 import { detectAuthoringTool } from './detectTool';
+import { testEncryption } from '@/scorm/edit/lectoraTestCrypto';
 import { dirname, join, IMAGE_RE, HTML_RE } from './paths';
 import type { Course, Slide } from '@/types/course';
 
@@ -84,6 +85,7 @@ export async function importScorm(file: File, onProgress?: ProgressFn): Promise<
   // chrome (e.g. a video page). A page hidden from the editor can't be deleted,
   // yet an export that removes its neighbours will re-route navigation onto it.
   const everyPageIsASlide = authoringTool === 'Lectora';
+  const encryption = authoringTool === 'Lectora' ? await testEncryption(zip) : undefined; // only Lectora is checked
 
   // 3) Map items → slides
   report(2);
@@ -297,6 +299,7 @@ export async function importScorm(file: File, onProgress?: ProgressFn): Promise<
       allowReview: true,
       description: '',
       ...(authoringTool ? { authoringTool } : {}),
+      ...(encryption ? { encryption } : {}),
     },
     slides,
   };

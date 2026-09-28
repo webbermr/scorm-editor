@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { Modal, ModalHead } from './Modal';
 import { Toggle } from '@/components/ui/Toggle';
@@ -6,7 +6,8 @@ import { HelpTip } from '@/components/ui/HelpTip';
 import { useCourse } from '@/store/courseStore';
 import { useUi } from '@/store/uiStore';
 import { usePreview } from '@/store/previewStore';
-import { buildScormPackage, downloadBlob, type ExportResult, type ValidationReport } from '@/scorm/export';
+import { buildScormPackage, downloadBlob, estimateMediaSavings, type ExportResult, type MediaSavings, type ValidationReport } from '@/scorm/export';
+import { humanSize } from '@/scorm/export/validate';
 import type { ScormVersion } from '@/types/course';
 
 type Phase = 'config' | 'building' | 'review' | 'error';
@@ -85,6 +86,22 @@ const OPTION_ROWS: Array<['manifest' | 'minify' | 'includeSource', string, React
   ],
 ];
 
+const UNUSED_MEDIA_HELP = (
+  <>
+    <p>
+      Leaves out images, audio and video that nothing in the course uses. Authoring tools often publish media the course no longer needs, such as
+      narration from other modules or images replaced in later versions.
+    </p>
+    <p>
+      A file counts as unused only when its name appears nowhere else in the package: not in any page, script, style sheet or data file, including the
+      course test. Anything the course mentions, even indirectly, is kept.
+    </p>
+    <p>Media used only by slides you deleted is always removed, whether or not this is on.</p>
+  </>
+);
+
+const count = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
+
 const labelRow = { display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 } as const;
 
 export function ExportModal() {
@@ -99,6 +116,9 @@ export function ExportModal() {
   const [version, setVersion] = useState<ScormVersion>(course.meta.scormVersion);
   const [name, setName] = useState(course.meta.package.replace(/\.zip$/, ''));
   const [opts, setOpts] = useState({ minify: true, includeSource: false, manifest: true });
+  // on by default where we've verified it on real courses (Lectora)
+  const [removeUnused, setRemoveUnused] = useState(course.meta.authoringTool === 'Lectora');
+  const [savings, setSavings] = useState<MediaSavings | 'checking' | 'failed'>('checking');
   const [phase, setPhase] = useState<Phase>('config');
   const [error, setError] = useState<string>('');
   const [report, setReport] = useState<ValidationReport | null>(null);
@@ -113,11 +133,26 @@ export function ExportModal() {
     return usePreview.getState().importedPages.filter((p) => !kept.has(p));
   })();
 
+  // how much media the faithful copy leaves out — shown next to the option
+  const removedKey = removedPages.join('\n');
+  useEffect(() => {
+    if (mode !== 'original' || !originalFile) return;
+    let live = true;
+    setSavings('checking');
+    estimateMediaSavings(course, originalFile, removedPages)
+      .then((s) => live && setSavings(s))
+      .catch(() => live && setSavings('failed'));
+    return () => {
+      live = false;
+    };
+    // re-run only when the package or the deleted pages change
+  }, [mode, originalFile, removedKey]);
+
   const build = async () => {
     setPhase('building');
     setError('');
     try {
-      const result = await buildScormPackage(course, { name, version: effectiveVersion, mode, ...opts }, originalFile, removedPages);
+      const result = await buildScormPackage(course, { name, version: effectiveVersion, mode, ...opts, removeUnusedMedia: removeUnused }, originalFile, removedPages);
       resultRef.current = result;
       setReport(result.report);
       setPhase('review');
@@ -189,6 +224,20 @@ export function ExportModal() {
           </div>
           <label className="field-label">Options</label>
           <div className="card" style={{ padding: '4px 14px', marginBottom: 18 }}>
+            {mode === 'original' && (
+              <div style={{ padding: '11px 0', borderBottom: '1px solid var(--line)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    Remove unused media
+                    <HelpTip label="Remove unused media">{UNUSED_MEDIA_HELP}</HelpTip>
+                  </span>
+                  {typeof savings === 'object' && !savings.unusedSkipped && savings.unused.files > 0 && (
+                    <Toggle on={removeUnused} onChange={() => setRemoveUnused((v) => !v)} />
+                  )}
+                </div>
+                <MediaSavingsNote savings={savings} on={removeUnused} />
+              </div>
+            )}
             {OPTION_ROWS.filter(([k]) => k !== 'manifest').map(([k, lbl, help], i, arr) => (
               <div key={k} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--line)' : 'none' }}>
                 <span style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -250,6 +299,31 @@ export function ExportModal() {
         </div>
       )}
     </Modal>
+  );
+}
+
+function MediaSavingsNote({ savings, on }: { savings: MediaSavings | 'checking' | 'failed'; on: boolean }) {
+  const style = { fontSize: 12, color: 'var(--ink-3)', marginTop: 4, lineHeight: 1.45 } as const;
+  if (savings === 'checking') return <div style={style}>Checking the course for unused media…</div>;
+  if (savings === 'failed') return <div style={style}>Couldn’t check this course for unused media.</div>;
+  const { unused, deletedSlides } = savings;
+  const main = savings.unusedSkipped
+    ? 'Not available: the course’s test file couldn’t be read, and it might be the only file that uses some media.'
+    : unused.files === 0
+      ? 'No unused media found.'
+      : on
+        ? `Makes the package about ${humanSize(unused.bytes)} smaller (${count(unused.files, 'file')} nothing in the course uses).`
+        : `Would make the package about ${humanSize(unused.bytes)} smaller (${count(unused.files, 'file')} nothing in the course uses).`;
+  return (
+    <div style={style}>
+      {main}
+      {deletedSlides.files > 0 && (
+        <>
+          {' '}
+          Media used only by deleted slides ({humanSize(deletedSlides.bytes)}, {count(deletedSlides.files, 'file')}) is always removed.
+        </>
+      )}
+    </div>
   );
 }
 

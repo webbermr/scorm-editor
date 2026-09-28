@@ -176,6 +176,10 @@ export interface CourseMeta {
   description: string;
   /** authoring tool detected on import (e.g. "Lectora"), if recognized */
   authoringTool?: string;
+  /** Lectora test definition encryption, detected on import: 'none' (plain or no
+   *  test), 'unlocked' (encrypted, decrypted with the course's own player key) or
+   *  'locked' (encrypted, couldn't be decrypted — its questions can't be edited) */
+  encryption?: 'none' | 'unlocked' | 'locked';
 }
 
 export interface Course {

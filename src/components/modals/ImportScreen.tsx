@@ -146,6 +146,12 @@ export function ImportScreen() {
             </button>
           </div>
           <div style={{ marginTop: 14, fontSize: 12, color: 'var(--ink-3)' }}>© {new Date().getFullYear()} Mark Webber</div>
+          <div style={{ marginTop: 4, fontSize: 11.5, color: 'var(--ink-3)' }}>
+            Build Date &amp; Time:{' '}
+            <time dateTime={__BUILD_TIME__}>
+              {new Date(__BUILD_TIME__).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}
+            </time>
+          </div>
         </div>
       </div>
     </div>

@@ -122,6 +122,7 @@ export function TopBar() {
               <Icon name="layers" size={12} /> {meta.authoringTool}
             </span>
           )}
+          {meta.encryption && <EncryptionBadge state={meta.encryption} />}
         </div>
       </div>
 
@@ -183,5 +184,35 @@ export function TopBar() {
         <Icon name="download" size={16} /> Export
       </button>
     </header>
+  );
+}
+
+const ENCRYPTION_BADGE = {
+  none: {
+    label: 'Not encrypted',
+    icon: 'unlock',
+    tip: 'Nothing in this course is encrypted',
+    style: { background: 'var(--surface-sunk)', color: 'var(--ink-2)' },
+  },
+  unlocked: {
+    label: 'Encrypted test',
+    icon: 'lock',
+    tip: 'The course test is encrypted. The editor unlocked it with the course’s own key, so deleted test questions are removed from it.',
+    style: { background: 'var(--accent-soft)', color: 'var(--accent-ink)' },
+  },
+  locked: {
+    label: 'Encrypted test · locked',
+    icon: 'lock',
+    tip: 'The course test is encrypted and couldn’t be unlocked. Deleted test question pages will be kept in the export.',
+    style: { background: 'var(--amber-soft)', color: 'var(--amber)' },
+  },
+} as const;
+
+function EncryptionBadge({ state }: { state: keyof typeof ENCRYPTION_BADGE }) {
+  const b = ENCRYPTION_BADGE[state];
+  return (
+    <span className="badge tip" data-tip={b.tip} style={b.style}>
+      <Icon name={b.icon} size={12} /> {b.label}
+    </span>
   );
 }

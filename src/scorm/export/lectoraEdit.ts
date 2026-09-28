@@ -11,6 +11,8 @@ import { decryptTest, encryptTest, findTestPassphrase } from '@/scorm/edit/lecto
 
 const NEXT_RE = /function\s+trivNextPage\(\)\s*\{\s*trivExitPage\(\s*'([^']+)'/;
 const PREV_RE = /function\s+trivPrevPage\(\)\s*\{\s*trivExitPage\(\s*'([^']+)'/;
+const NEXT_CALL_RE = /(function\s+trivNextPage\(\)\s*\{\s*)trivExitPage\([^()]*\)/;
+const PREV_CALL_RE = /(function\s+trivPrevPage\(\)\s*\{\s*)trivExitPage\([^()]*\)/;
 const PAGENUM_RE = /PageInChapter\.set\(\s*'(\d+)'/;
 const PAGESTOT_RE = /PagesInChapter\.set\(\s*'(\d+)'/;
 
@@ -79,6 +81,30 @@ function encodeTestObj(t: TestObj, xml: string): string {
   const lines: string[] = [];
   for (let i = 0; i < b64.length; i += t.lineLen) lines.push(b64.slice(i, i + t.lineLen));
   return lines.join(t.eol) + (t.trailingEol ? t.eol : '');
+}
+
+/** Every Lectora test definition in the package as XML (decrypting when needed),
+ *  plus the paths of any that couldn't be read. */
+export async function readTestXml(srcZip: JSZip): Promise<{ xml: string[]; unreadable: string[] }> {
+  const paths: string[] = [];
+  srcZip.forEach((p, e) => {
+    if (!e.dir && TEST_OBJ_RE.test(p)) paths.push(p);
+  });
+  const xml: string[] = [];
+  const unreadable: string[] = [];
+  let passphrase: string | null | undefined;
+  for (const tp of paths) {
+    const raw = await srcZip.file(tp)!.async('string');
+    const t = decodeTestObj(tp, raw);
+    if (t === 'encrypted') {
+      if (passphrase === undefined) passphrase = await findTestPassphrase(srcZip);
+      const x = passphrase ? decryptTest(raw, passphrase) : null;
+      if (x) xml.push(x);
+      else unreadable.push(tp);
+    } else if (t) xml.push(t.xml);
+    else unreadable.push(tp);
+  }
+  return { xml, unreadable };
 }
 
 /** Drop removed pages from a test's question list, renumber, cap each section's
@@ -213,6 +239,36 @@ export async function planLectoraDeletions(srcZip: JSZip, removedSet: Set<string
     return undefined;
   };
 
+  // Where a jump from surviving page `from` to removed page `r` should land now.
+  // Keeps the jump's direction — a Back button goes further back, Next and
+  // auto-advance (e.g. "narration finished → next page") go further forward —
+  // and never lands on `from` itself: a page that auto-advances to itself replays
+  // forever, trapping the learner. undefined = nothing left that way (disable it).
+  const jumpTarget = (from: string, r: string): string | undefined => {
+    const fi = orderIdx.get(from);
+    const ri = orderIdx.get(r);
+    let s: string | undefined;
+    if (fi === undefined || ri === undefined || fi === ri) s = nearest(r);
+    else {
+      const dir = ri > fi ? 'next' : 'prev';
+      s = survivor(r, dir);
+      if (!s) {
+        // chain broken past r: continue through course order the same way
+        const ok = (q: string) => !removed.has(q) && q !== from && !!(nav.get(q)?.next || nav.get(q)?.prev);
+        const step = dir === 'next' ? 1 : -1;
+        for (let i = ri + step; i >= 0 && i < order.length && (dir === 'next' ? i > fi : i < fi); i += step) {
+          if (ok(order[i])) {
+            s = order[i];
+            break;
+          }
+        }
+      }
+    }
+    return s === from ? undefined : s;
+  };
+  // a call that navigates to page `r` (also inside escaped JS strings: \'r\')
+  const exitCall = (r: string) => new RegExp(`trivExitPage\\(\\s*(\\\\?['"])${esc(r)}\\1\\s*(?:,[^()]*)?\\)`, 'g');
+
   // segment into chapters at PageInChapter == 1, renumber the survivors
   const chapters: string[][] = [];
   let chapter: string[] = [];
@@ -243,14 +299,15 @@ export async function planLectoraDeletions(srcZip: JSZip, removedSet: Set<string
     const n = nav.get(p)!;
 
     // re-point next/prev past removed pages; at a boundary (now first/last page)
-    // fall back to self so the Prev/Next button is a harmless no-op.
+    // there's nowhere to go, so the button does nothing. (Pointing it at the page
+    // itself would make anything that calls it — auto-advance — loop forever.)
     if (n.next && removed.has(n.next)) {
-      const s = survivor(n.next, 'next') ?? p;
-      h = h.replace(NEXT_RE, (m) => m.replace(/'[^']+'/, `'${s}'`));
+      const s = survivor(n.next, 'next');
+      h = s ? h.replace(NEXT_RE, (m) => m.replace(/'[^']+'/, `'${s}'`)) : h.replace(NEXT_CALL_RE, '$1void 0');
     }
     if (n.prev && removed.has(n.prev)) {
-      const s = survivor(n.prev, 'prev') ?? p;
-      h = h.replace(PREV_RE, (m) => m.replace(/'[^']+'/, `'${s}'`));
+      const s = survivor(n.prev, 'prev');
+      h = s ? h.replace(PREV_RE, (m) => m.replace(/'[^']+'/, `'${s}'`)) : h.replace(PREV_CALL_RE, '$1void 0');
     }
     if (newNum.has(p)) h = h.replace(PAGENUM_RE, (m) => m.replace(/'\d+'/, `'${newNum.get(p)}'`));
     if (newTot.has(p)) h = h.replace(PAGESTOT_RE, (m) => m.replace(/'\d+'/, `'${newTot.get(p)}'`));
@@ -263,7 +320,15 @@ export async function planLectoraDeletions(srcZip: JSZip, removedSet: Set<string
       }
     }
 
-    // any remaining stray references (jump buttons, dashboard links, links inside
+    // direct jumps (Back buttons, auto-advance when narration ends, ...) keep their
+    // direction; with nowhere left to go they're disabled rather than self-looping
+    for (const r of removed) {
+      if (!h.includes(r)) continue;
+      const s = jumpTarget(p, r);
+      h = h.replace(exitCall(r), (m, q: string) => (s ? m.replace(`${q}${r}${q}`, `${q}${s}${q}`) : 'void 0'));
+    }
+
+    // any remaining stray references (dashboard links, jump menus, links inside
     // escaped JS strings like \'page.html\') → nearest surviving page
     for (const r of removed) {
       if (!h.includes(r)) continue;
@@ -273,6 +338,16 @@ export async function planLectoraDeletions(srcZip: JSZip, removedSet: Set<string
     }
 
     if (h !== text.get(p)) rewrites.set(p, h);
+  }
+
+  // Safety net: no page may gain a jump to itself (the "slide repeats forever" bug).
+  const selfJumps = (p: string, h: string) => (h.match(exitCall(p)) ?? []).length;
+  const looping = [...rewrites].filter(([p, h]) => selfJumps(p, h) > selfJumps(p, text.get(p)!)).map(([p]) => p);
+  if (looping.length) {
+    warnings.push({
+      message: `${looping.length} page${looping.length === 1 ? ' now links' : 's now link'} back to ${looping.length === 1 ? 'itself' : 'themselves'} after the deletions, which can make the slide repeat in the LMS.`,
+      detail: 'Check these pages in LMS Preview before uploading: ' + looping.map((p) => p.replace(/^.*\//, '')).join(', '),
+    });
   }
 
   for (const t of tests) {
