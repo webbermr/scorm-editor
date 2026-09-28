@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Icon } from '@/components/Icon';
 import { HelpTip } from '@/components/ui/HelpTip';
 import { useCourse } from '@/store/courseStore';
@@ -22,9 +23,13 @@ export function TopBar() {
   const setModal = useUi((s) => s.setModal);
 
   const { save } = useEditorActions();
+  // imported courses preview real slides in the slide view (LMS Preview), so the
+  // Edit / Preview switch is only for courses without an original package
   const hasPackage = usePreview((s) => !!s.file && !!s.launchHref);
-  const previewSupported = usePreview((s) => s.supported);
   const resetUi = useUi((s) => s.reset);
+  useEffect(() => {
+    if (hasPackage && mode === 'preview') setMode('edit');
+  }, [hasPackage, mode, setMode]);
 
   const startOver = () => {
     if (!window.confirm('Discard the current course and import a new package? This clears the saved draft in this browser.')) return;
@@ -142,15 +147,17 @@ export function TopBar() {
         </button>
       </div>
 
-      {/* mode toggle */}
-      <div className="seg">
-        <button className={mode === 'edit' ? 'on' : ''} onClick={() => setMode('edit')}>
-          <Icon name="edit" size={15} /> Edit
-        </button>
-        <button className={mode === 'preview' ? 'on' : ''} onClick={() => setMode('preview')}>
-          <Icon name="eye" size={15} /> Preview
-        </button>
-      </div>
+      {/* mode toggle — only for courses without an original package to preview */}
+      {!hasPackage && (
+        <div className="seg">
+          <button className={mode === 'edit' ? 'on' : ''} onClick={() => setMode('edit')}>
+            <Icon name="edit" size={15} /> Edit
+          </button>
+          <button className={mode === 'preview' ? 'on' : ''} onClick={() => setMode('preview')}>
+            <Icon name="eye" size={15} /> Preview
+          </button>
+        </div>
+      )}
 
       <button
         className="btn btn-sm btn-icon btn-ghost tip"
@@ -166,17 +173,6 @@ export function TopBar() {
       </button>
 
       <div style={{ width: 1, height: 24, background: 'var(--line)' }} />
-      {hasPackage && (
-        <button
-          className="btn btn-soft tip"
-          data-tip={previewSupported ? 'See the imported package rendered as the LMS would' : 'Needs HTTPS or localhost (service worker required)'}
-          onClick={() => previewSupported && setModal('original')}
-          disabled={!previewSupported}
-          style={{ opacity: previewSupported ? 1 : 0.5 }}
-        >
-          <Icon name="eye" size={16} /> LMS Preview
-        </button>
-      )}
       <button className="btn btn-soft" onClick={save}>
         <Icon name="save" size={16} /> {dirty ? 'Save' : 'Saved'}
       </button>

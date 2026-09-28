@@ -18,6 +18,8 @@ export interface UiStore {
   mode: Mode;
   inspectorOpen: boolean;
   modal: ModalKind;
+  /** page the full-screen LMS Preview opens on (null: the course's launcher) */
+  originalHref: string | null;
   /** block id currently targeted by the Replace-image modal */
   replaceTargetBlockId: string | null;
   previewIndex: number;
@@ -35,6 +37,8 @@ export interface UiStore {
   setInspectorOpen: (v: boolean | ((p: boolean) => boolean)) => void;
   setModal: (m: ModalKind) => void;
   openReplace: (blockId: string) => void;
+  /** full-screen LMS Preview, starting on `href` (default: the course's launcher) */
+  openOriginal: (href?: string | null) => void;
   setPreviewIndex: (i: number) => void;
   flash: (msg: string) => void;
   /** return to the import screen for a fresh start */
@@ -50,6 +54,7 @@ export const useUi = create<UiStore>((set) => ({
   mode: 'edit',
   inspectorOpen: false,
   modal: null,
+  originalHref: null,
   replaceTargetBlockId: null,
   previewIndex: 0,
   toast: null,
@@ -77,6 +82,7 @@ export const useUi = create<UiStore>((set) => ({
   setInspectorOpen: (v) => set((s) => ({ inspectorOpen: typeof v === 'function' ? v(s.inspectorOpen) : v })),
   setModal: (modal) => set({ modal }),
   openReplace: (replaceTargetBlockId) => set({ modal: 'replace', replaceTargetBlockId }),
+  openOriginal: (originalHref = null) => set({ modal: 'original', originalHref }),
   setPreviewIndex: (previewIndex) => set({ previewIndex }),
   flash: (msg) => {
     if (toastTimer) clearTimeout(toastTimer);

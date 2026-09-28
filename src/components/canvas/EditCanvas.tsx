@@ -6,6 +6,7 @@ import { useCourse } from '@/store/courseStore';
 import { usePreview } from '@/store/previewStore';
 import { SlideBody } from './SlideBody';
 import { OriginalView } from '@/components/preview/OriginalView';
+import { WRAPPER_PAGE } from '@/scorm/preview/fileServer';
 import type { InlineEdit } from '@/scorm/preview/inlineTextEdit';
 import type { OverlayChanges, Slide } from '@/types/course';
 import { overlayNote } from '@/lib/overlayNote';
@@ -153,6 +154,25 @@ export function EditCanvas({ slide, slideIndex, total }: Props) {
                   </span>
                 )}
               </button>
+            )}
+            {view === 'original' && hasOriginal && slide.sourceHref && (
+              <div style={{ display: 'flex', gap: 2 }} onMouseDown={(e) => e.stopPropagation()}>
+                <button className="btn btn-sm btn-icon btn-ghost tip" data-tip="Full screen" aria-label="Full screen" onClick={() => useUi.getState().openOriginal(slide.sourceHref)}>
+                  <Icon name="fullscreen" size={16} />
+                </button>
+                <button
+                  className="btn btn-sm btn-icon btn-ghost tip"
+                  data-tip="Open in new tab"
+                  aria-label="Open in new tab"
+                  onClick={async () => {
+                    const base = await usePreview.getState().ensureMounted();
+                    // via the LMS-shim wrapper so the player finds a (stub) SCORM API
+                    if (base && slide.sourceHref) window.open(`${base}${WRAPPER_PAGE}?page=${encodeURIComponent(slide.sourceHref)}`, '_blank', 'noopener');
+                  }}
+                >
+                  <Icon name="external" size={16} />
+                </button>
+              </div>
             )}
             <span style={{ fontSize: 12, color: 'var(--ink-3)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
               <Icon name="clock" size={13} /> {slide.duration}
