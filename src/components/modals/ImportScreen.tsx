@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { useCourse } from '@/store/courseStore';
 import { useUi } from '@/store/uiStore';
@@ -146,14 +146,30 @@ export function ImportScreen() {
             </button>
           </div>
           <div style={{ marginTop: 14, fontSize: 12, color: 'var(--ink-3)' }}>© {new Date().getFullYear()} Mark Webber</div>
-          <div style={{ marginTop: 4, fontSize: 11.5, color: 'var(--ink-3)' }}>
-            Build Date &amp; Time:{' '}
-            <time dateTime={__BUILD_TIME__}>
-              {new Date(__BUILD_TIME__).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}
-            </time>
-          </div>
+          <BuildTime />
         </div>
       </div>
+    </div>
+  );
+}
+
+/** "Build Date & Time" under the copyright, from build-info.json (written by
+ *  vite.config.ts). Kept out of the bundle so asset hashes don't change per build. */
+function BuildTime() {
+  const [builtAt, setBuiltAt] = useState<string | null>(null);
+  useEffect(() => {
+    fetch('/build-info.json', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((info: { builtAt?: string } | null) => info?.builtAt && setBuiltAt(info.builtAt))
+      .catch(() => {});
+  }, []);
+  if (!builtAt) return null;
+  return (
+    <div style={{ marginTop: 4, fontSize: 11.5, color: 'var(--ink-3)' }}>
+      Build Date &amp; Time:{' '}
+      <time dateTime={builtAt}>
+        {new Date(builtAt).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}
+      </time>
     </div>
   );
 }
