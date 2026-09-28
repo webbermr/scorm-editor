@@ -42,7 +42,7 @@ Then open **http://localhost:8081**. (The published port is set in `docker-compo
 
 > **Heads-up — the “View Original” feature needs a secure context.** It relies on a
 > service worker + Cache API, which browsers only allow over **HTTPS** or
-> **`localhost`**. Accessing the container via `http://localhost:8080` works; over a
+> **`localhost`**. Accessing the container via `http://localhost:8081` works; over a
 > plain `http://<server-ip>` it won't (import/edit/export still work, but “View
 > Original” shows a fallback message). For remote/production use, put the container
 > behind a TLS-terminating reverse proxy (Caddy, Traefik, nginx, a load balancer, …).
@@ -79,6 +79,43 @@ Your users then open `https://scorm.yourdomain.com`. The token lives only in `.e
 Plain local runs (`docker compose up -d`, no profile) don't start the tunnel and need
 no token.
 
+#### Replacing an older deployment
+The containers have fixed names (`scorm-editor`, `scorm-editor-tunnel`), so a new
+clone can't start while an older deployment in another folder is still running.
+Stop the old one first, and reuse its `.env`:
+```bash
+cd /path/to/old/scorm-editor && docker compose --profile tunnel down
+#   (or, from anywhere: docker rm -f scorm-editor scorm-editor-tunnel)
+git clone https://github.com/webbermr/scorm-editor.git
+cd scorm-editor
+cp /path/to/old/scorm-editor/.env .
+docker compose --profile tunnel up -d --build
+```
+
+#### Updating
+```bash
+cd scorm-editor
+git pull
+docker compose --profile tunnel up -d --build
+```
+Check the result with `docker ps` (`scorm-editor` should be **healthy**); the start
+screen shows the **Build Date & Time** of the build you're running.
+
+#### Running more than one host behind the same tunnel
+A tunnel can have several connectors (e.g. two machines each running this compose
+stack with the same `TUNNEL_TOKEN`); Cloudflare then spreads requests between them.
+**Every host must run the same commit.** A page served by one host can request its
+hashed `/assets/index-*.js` from another, and if the hosts are on different versions
+that file doesn't exist there and the app fails to load. So update every host
+together (`git pull` + rebuild on each), then check they serve the same bundle:
+```bash
+curl -s localhost:8081/ | grep -o 'assets/index-[^"]*\.js'   # must print the same name on every host
+```
+Builds are reproducible — the same commit produces the same asset names on any
+machine — because nothing build-specific goes into the bundle (the build timestamp
+lives in a separate, uncached `build-info.json`). Keep it that way: don't inject
+per-build values into the bundle.
+
 ## What's real (not mocked)
 - **SCORM import** — genuine unzip → parse `imsmanifest.xml` → detect 1.2 vs 2004 →
   map the organization/item tree to slides → extract media to object URLs →
@@ -107,9 +144,9 @@ no token.
     filtered out. A plain, simplified layout (not the original design). The manifest is
     regenerated for the chosen version (1.2 or 2004) and validated.
 
-**View Original** — because runtime-rendered packages (e.g. Lectora) can only be
-*decomposed* to text, each imported slide also offers a **Blocks / Original** toggle,
-and the top bar has a **View Original** button. These render the real imported
+**LMS Preview** — because runtime-rendered packages (e.g. Lectora) can only be
+*decomposed* to text, each imported slide also offers a **Blocks / LMS Preview**
+toggle, with **Full screen** and **Open in new tab** buttons. These render the real imported
 page(s) in an iframe served by an in-app file server (a service worker backed by the
 Cache API, see [`src/scorm/preview/`](./src/scorm/preview) + [`public/scorm-sw.js`](./public/scorm-sw.js)),
 so you see the source course with full fidelity — images, layout, scripts — exactly
