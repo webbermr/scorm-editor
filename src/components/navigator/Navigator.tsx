@@ -142,15 +142,26 @@ export function Navigator() {
           <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 1 }}>
             {slides.length} items · {completed} done
           </div>
-          {sectionGroups.length > 0 && (
-            <button className="rail-expand-all" onClick={() => setAllExpanded(!allExpanded)} aria-label={allExpanded ? 'Collapse all sections' : 'Expand all sections'}>
-              <Icon name={allExpanded ? 'chevRight' : 'chevDown'} size={12} />
-              {allExpanded ? 'Collapse all' : 'Expand all'}
-            </button>
-          )}
         </div>
         <button className="btn btn-sm btn-soft tip" data-tip="Add slide" onClick={() => setModal('add')}>
           <Icon name="plus" size={15} /> Add
+        </button>
+      </div>
+      <div className="rail-actions" style={{ padding: '0 16px 10px' }}>
+        {sectionGroups.length > 0 && (
+          <button className="rail-expand-all" onClick={() => setAllExpanded(!allExpanded)} aria-label={allExpanded ? 'Collapse all sections' : 'Expand all sections'}>
+            <Icon name={allExpanded ? 'chevRight' : 'chevDown'} size={12} />
+            {allExpanded ? 'Collapse all' : 'Expand all'}
+          </button>
+        )}
+        {/* tick every slide (and so every section), or none */}
+        <button className="rail-expand-all" onClick={() => setCheckedSlides(slides.map((s) => s.id))} disabled={checked.size === slides.length}>
+          <Icon name="check" size={12} />
+          Select all
+        </button>
+        <button className="rail-expand-all" onClick={() => setCheckedSlides([])} disabled={!anyChecked}>
+          <Icon name="close" size={12} />
+          Deselect all
         </button>
       </div>
 
