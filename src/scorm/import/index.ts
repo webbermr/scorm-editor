@@ -8,6 +8,7 @@ import { htmlToBlocks, type DecomposeResult } from './htmlToBlocks';
 import { recoverRuntimeText, sharedChrome } from './recoverText';
 import { detectAuthoringTool } from './detectTool';
 import { testEncryption } from '@/scorm/edit/lectoraTestCrypto';
+import { embeddedPages, lectoraCourseOrder, lectoraSections } from '@/scorm/export/lectoraEdit';
 import { dirname, join, IMAGE_RE, HTML_RE } from './paths';
 import type { Course, Slide } from '@/types/course';
 
@@ -272,6 +273,32 @@ export async function importScorm(file: File, onProgress?: ProgressFn): Promise<
       // Asset/cluster with no launchable HTML — keep a minimal editable heading.
       slides.push(headingSlide(item.title));
     }
+  }
+
+  // Lectora: slides in course order (the manifest lists pages alphabetically), and
+  // not the panel pages every slide embeds (the table of contents) — they aren't
+  // slides, and deleting one broke every remaining page.
+  if (everyPageIsASlide) {
+    const pages = new Map<string, string>();
+    for (const p of allPaths.filter((q) => HTML_RE.test(q))) pages.set(p, (await readFile(p)) ?? '');
+    const embedded = new Set([...pages].flatMap(([p, h]) => embeddedPages(p, h)));
+    const rank = new Map(lectoraCourseOrder(pages, courseLaunchHref).map((p, i) => [p, i]));
+    const at = (sl: Slide) => (sl.sourceHref ? (rank.get(sl.sourceHref) ?? rank.size) : rank.size);
+    const kept = slides.filter((sl) => !sl.sourceHref || !embedded.has(sl.sourceHref));
+    kept.sort((a, b) => at(a) - at(b)); // stable: unranked keep manifest order
+    // sections from the table of contents; each section's slides kept together,
+    // sections in the order the course reaches them
+    const sections = lectoraSections(pages);
+    for (const sl of kept) {
+      const sec = sl.sourceHref ? sections.get(sl.sourceHref) : undefined;
+      if (sec) sl.section = sec;
+    }
+    if (sections.size) {
+      const firstSeen = new Map<string, number>();
+      kept.forEach((sl, i) => firstSeen.has(sl.section ?? '') || firstSeen.set(sl.section ?? '', i));
+      kept.sort((a, b) => firstSeen.get(a.section ?? '')! - firstSeen.get(b.section ?? '')!);
+    }
+    slides.splice(0, slides.length, ...kept);
   }
 
   // 4) finish media extraction (any remaining unreferenced images are left lazy)

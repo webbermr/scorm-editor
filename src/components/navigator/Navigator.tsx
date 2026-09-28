@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   DndContext,
   PointerSensor,
@@ -16,6 +16,10 @@ import { useCourse } from '@/store/courseStore';
 import { useUi } from '@/store/uiStore';
 import { useEditorActions } from '@/lib/useEditorActions';
 import { SlideCard } from './SlideCard';
+import { SectionHeader } from './SectionHeader';
+import type { Slide } from '@/types/course';
+
+const OTHER = 'Other pages';
 
 export function Navigator() {
   const slides = useCourse((s) => s.course.slides);
@@ -28,6 +32,51 @@ export function Navigator() {
   const setCheckedSlides = useUi((s) => s.setCheckedSlides);
   const setModal = useUi((s) => s.setModal);
   const { deleteSlide, deleteSlides, duplicateSlide } = useEditorActions();
+
+  // Course sections (from the course's table of contents): consecutive slides of
+  // the same section form one group. Courses without sections show a flat list.
+  const hasSections = slides.some((s) => s.section);
+  const groups: Array<{ key: string; title: string; slides: Array<{ slide: Slide; index: number }> }> = [];
+  slides.forEach((slide, index) => {
+    const title = hasSections ? (slide.section ?? OTHER) : '';
+    const last = groups[groups.length - 1];
+    if (last && last.title === title) last.slides.push({ slide, index });
+    else {
+      // keyed by name (+ which run of it), so collapsing survives deleting other sections
+      const run = groups.filter((g) => g.title === title).length;
+      groups.push({ key: `${title}#${run}`, title, slides: [{ slide, index }] });
+    }
+  });
+  // sections start collapsed; this holds the ones the user opened
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const isCollapsed = (g: { key: string; title: string }) => !!g.title && !expanded.has(g.key);
+  const toggleCollapsed = (key: string) =>
+    setExpanded((c) => {
+      const n = new Set(c);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
+      return n;
+    });
+  const sectionGroups = groups.filter((g) => g.title);
+  const allExpanded = sectionGroups.length > 0 && sectionGroups.every((g) => expanded.has(g.key));
+  const setAllExpanded = (open: boolean) => setExpanded(open ? new Set(sectionGroups.map((g) => g.key)) : new Set());
+  const groupOf = (id: string | null) => groups.find((g) => g.slides.some((x) => x.slide.id === id));
+
+  // keep the selected slide in view (e.g. while it follows the course playing in
+  // LMS Preview), opening its section if it's collapsed — but not for the slide
+  // selected when the course opens, so the list starts with every section closed
+  const prevSelected = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevSelected.current;
+    prevSelected.current = selectedId;
+    if (!selectedId || !prev || prev === selectedId) return;
+    const g = groupOf(selectedId);
+    if (g && isCollapsed(g)) toggleCollapsed(g.key);
+    requestAnimationFrame(() =>
+      document.querySelector(`.slide-card[data-slide-id="${selectedId}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+    );
+    // only when the selection changes
+  }, [selectedId]);
 
   // ignore ids that no longer exist (e.g. after undo/redo)
   const checked = new Set(checkedIds.filter((id) => slides.some((s) => s.id === id)));
@@ -42,6 +91,16 @@ export function Navigator() {
       else toggleSlideCheck(id);
     } else selectSlide(id);
   };
+  // section header: tick all its slides (or untick them when all are ticked), delete it
+  const toggleSectionChecked = (ids: string[]) => {
+    const allOn = ids.every((id) => checked.has(id));
+    setCheckedSlides(allOn ? [...checked].filter((id) => !ids.includes(id)) : [...new Set([...checked, ...ids])]);
+  };
+  const deleteSection = (title: string, ids: string[]) => {
+    if (!window.confirm(`Delete the “${title}” section — all ${ids.length} slide${ids.length === 1 ? '' : 's'} in it? You can undo this.`)) return;
+    deleteSlides(ids);
+  };
+
   // a card's trash button removes all ticked slides when that card is ticked
   const onDelete = (id: string) => (checked.has(id) ? deleteSlides(orderedChecked()) : deleteSlide(id));
 
@@ -83,6 +142,12 @@ export function Navigator() {
           <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 1 }}>
             {slides.length} items · {completed} done
           </div>
+          {sectionGroups.length > 0 && (
+            <button className="rail-expand-all" onClick={() => setAllExpanded(!allExpanded)} aria-label={allExpanded ? 'Collapse all sections' : 'Expand all sections'}>
+              <Icon name={allExpanded ? 'chevRight' : 'chevDown'} size={12} />
+              {allExpanded ? 'Collapse all' : 'Expand all'}
+            </button>
+          )}
         </div>
         <button className="btn btn-sm btn-soft tip" data-tip="Add slide" onClick={() => setModal('add')}>
           <Icon name="plus" size={15} /> Add
@@ -148,23 +213,45 @@ export function Navigator() {
             setActiveId(null);
           }}
         >
-          <SortableContext items={slides.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+          <SortableContext
+            items={groups.filter((g) => !isCollapsed(g)).flatMap((g) => g.slides.map((x) => x.slide.id))}
+            strategy={verticalListSortingStrategy}
+          >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              {slides.map((slide, i) => (
-                <SlideCard
-                  key={slide.id}
-                  slide={slide}
-                  index={i}
-                  selected={slide.id === selectedId}
-                  checked={checked.has(slide.id)}
-                  multi={anyChecked}
-                  dropBefore={overId === slide.id && activeId !== null && activeId !== slide.id}
-                  onSelect={onSelect}
-                  onToggle={toggleSlideCheck}
-                  onDelete={onDelete}
-                  onDuplicate={duplicateSlide}
-                />
-              ))}
+              {groups.map((g) => {
+                const ids = g.slides.map((x) => x.slide.id);
+                return (
+                  <div key={g.key} role={g.title ? 'group' : undefined} aria-label={g.title || undefined} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {g.title && (
+                      <SectionHeader
+                        title={g.title}
+                        count={ids.length}
+                        checkedCount={ids.filter((id) => checked.has(id)).length}
+                        collapsed={isCollapsed(g)}
+                        onToggleCollapsed={() => toggleCollapsed(g.key)}
+                        onToggleChecked={() => toggleSectionChecked(ids)}
+                        onDelete={() => deleteSection(g.title, ids)}
+                      />
+                    )}
+                    {!isCollapsed(g) &&
+                      g.slides.map(({ slide, index }) => (
+                        <SlideCard
+                          key={slide.id}
+                          slide={slide}
+                          index={index}
+                          selected={slide.id === selectedId}
+                          checked={checked.has(slide.id)}
+                          multi={anyChecked}
+                          dropBefore={overId === slide.id && activeId !== null && activeId !== slide.id}
+                          onSelect={onSelect}
+                          onToggle={(id, e) => (e.shiftKey ? checkSlideRange(id, slides.map((s) => s.id)) : toggleSlideCheck(id))}
+                          onDelete={onDelete}
+                          onDuplicate={duplicateSlide}
+                        />
+                      ))}
+                  </div>
+                );
+              })}
             </div>
           </SortableContext>
         </DndContext>

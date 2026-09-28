@@ -156,6 +156,8 @@ export interface Slide {
   rawImported?: boolean;
   /** package-relative path of the original imported page (for the "View Original" iframe) */
   sourceHref?: string;
+  /** course section ("chapter") the slide belongs to, from the course's table of contents */
+  section?: string;
 }
 
 // ---- Course meta + root ----

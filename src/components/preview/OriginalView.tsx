@@ -4,6 +4,7 @@ import { Icon } from '@/components/Icon';
 import { usePreview } from '@/store/previewStore';
 import { setupInlineTextEdit, type InlineEdit, type InlineEditController, type PickInfo } from '@/scorm/preview/inlineTextEdit';
 import type { OverlayChanges } from '@/types/course';
+import { dirname, join } from '@/scorm/import/paths';
 
 interface ActiveEdit {
   elementId: string;
@@ -27,6 +28,10 @@ interface Props {
   getEdits?: () => InlineEdit[];
   /** report a finished text edit */
   onEdit?: (elementId: string, from: string, to: string, overlays?: OverlayChanges) => void;
+  /** the course moved to another page on its own (Next, auto-advance, menus) —
+   *  package-relative href. Selecting that page's slide (href → that page) then
+   *  doesn't reload the preview, so playback carries on. */
+  onPageChange?: (href: string) => void;
 }
 
 // Renders an imported package's original page in an iframe served by the in-app
@@ -35,7 +40,7 @@ interface Props {
 // desktop layout natively (no shrinking, no clipped headers); height is the real
 // content height for document-flow pages, or a slide-ratio viewport for
 // fixed-window (height:100%) pages like Lectora.
-export function OriginalView({ href, style, title = 'Original page', fill = false, editable = false, getEdits, onEdit }: Props) {
+export function OriginalView({ href, style, title = 'Original page', fill = false, editable = false, getEdits, onEdit, onPageChange }: Props) {
   const ensureMounted = usePreview((s) => s.ensureMounted);
   const supported = usePreview((s) => s.supported);
   const hasFile = usePreview((s) => !!s.file);
@@ -54,6 +59,11 @@ export function OriginalView({ href, style, title = 'Original page', fill = fals
   const activeRef = useRef<ActiveEdit | null>(null);
   activeRef.current = active;
 
+  // the page the iframe is showing right now (package-relative), as last seen
+  const shownRef = useRef<string | null>(null);
+  const onPageChangeRef = useRef(onPageChange);
+  onPageChangeRef.current = onPageChange;
+
   // Resolve the iframe's current page back to a package-relative href.
   const resolvePageHref = (win: Window): string | null => {
     let path: string;
@@ -66,6 +76,19 @@ export function OriginalView({ href, style, title = 'Original page', fill = fals
     if (base && path.startsWith(base)) return path.slice(base.length);
     const m = path.match(/\/scorm-fs\/[^/]+\/(.*)$/);
     return m ? m[1] : null;
+  };
+
+  // The page the course is playing. Lectora's single-page player keeps one URL
+  // (the launcher) and swaps pages inside it, so ask the player first.
+  const playingPage = (win: Window): string | null => {
+    const here = resolvePageHref(win);
+    try {
+      const name = (win as unknown as { pagePlayer?: { activePage?: { name?: unknown } } }).pagePlayer?.activePage?.name;
+      if (typeof name === 'string' && name.trim()) return join(dirname(here ?? ''), name.trim());
+    } catch {
+      /* player not ready / not a Lectora page */
+    }
+    return here;
   };
 
   // Map an element's iframe-viewport rect to a popover anchor in parent coords.
@@ -146,6 +169,9 @@ export function OriginalView({ href, style, title = 'Original page', fill = fals
   const [size, setSize] = useState({ w: 0, h: 520 });
 
   useEffect(() => {
+    // already on screen (the course navigated there itself) — don't restart it
+    if (href && href === shownRef.current && iframeRef.current) return;
+    shownRef.current = href;
     let cancelled = false;
     flowRef.current = false; // re-classify for the new page
     setState('loading');
@@ -167,6 +193,27 @@ export function OriginalView({ href, style, title = 'Original page', fill = fals
       cancelled = true;
     };
   }, [href, supported, hasFile, ensureMounted]);
+
+  // Follow the course as it plays: report each page it moves to.
+  const following = !!onPageChange;
+  useEffect(() => {
+    if (!following || !src) return;
+    const t = setInterval(() => {
+      let win: Window | null | undefined;
+      try {
+        win = iframeRef.current?.contentWindow;
+      } catch {
+        return;
+      }
+      const page = win ? playingPage(win) : null;
+      if (page && page !== shownRef.current) {
+        shownRef.current = page;
+        onPageChangeRef.current?.(page);
+      }
+    }, 400);
+    return () => clearInterval(t);
+    // playingPage only reads refs / the store
+  }, [following, src]);
 
   const fit = useCallback(() => {
     const iframe = iframeRef.current;

@@ -12,6 +12,8 @@ export interface UiStore {
   selectedSlideId: string | null;
   /** slides ticked in the navigator for bulk actions — independent of the slide being edited */
   checkedSlideIds: string[];
+  /** where a ⇧-click range starts: the slide last clicked or ticked */
+  checkAnchorId: string | null;
   selectedBlockId: string | null;
   mode: Mode;
   inspectorOpen: boolean;
@@ -25,7 +27,7 @@ export interface UiStore {
   selectSlide: (id: string) => void;
   /** checkbox / ⌘-click: tick or untick one slide */
   toggleSlideCheck: (id: string) => void;
-  /** ⇧-click: tick every slide between the current slide and `id` (in `order`) */
+  /** ⇧-click: also tick every slide between the last clicked/ticked slide and `id` (in `order`) */
   checkSlideRange: (id: string, order: string[]) => void;
   setCheckedSlides: (ids: string[]) => void;
   selectBlock: (id: string | null) => void;
@@ -43,6 +45,7 @@ export const useUi = create<UiStore>((set) => ({
   imported: false,
   selectedSlideId: null,
   checkedSlideIds: [],
+  checkAnchorId: null,
   selectedBlockId: null,
   mode: 'edit',
   inspectorOpen: false,
@@ -52,18 +55,21 @@ export const useUi = create<UiStore>((set) => ({
   toast: null,
 
   setImported: (imported) => set({ imported }),
-  selectSlide: (selectedSlideId) => set({ selectedSlideId, selectedBlockId: null }),
+  selectSlide: (selectedSlideId) => set({ selectedSlideId, selectedBlockId: null, checkAnchorId: selectedSlideId }),
   toggleSlideCheck: (id) =>
     set((s) => ({
       checkedSlideIds: s.checkedSlideIds.includes(id) ? s.checkedSlideIds.filter((x) => x !== id) : [...s.checkedSlideIds, id],
+      checkAnchorId: id,
     })),
   checkSlideRange: (id, order) =>
     set((s) => {
-      const a = order.indexOf(s.selectedSlideId ?? id);
       const b = order.indexOf(id);
       if (b < 0) return s;
-      if (a < 0) return { checkedSlideIds: [id] };
-      return { checkedSlideIds: order.slice(Math.min(a, b), Math.max(a, b) + 1) };
+      // from the last clicked/ticked slide (else the open one); a vanished anchor
+      // (deleted, undone) just ticks the clicked slide
+      const a = order.indexOf(s.checkAnchorId ?? s.selectedSlideId ?? id);
+      const range = a < 0 ? [id] : order.slice(Math.min(a, b), Math.max(a, b) + 1);
+      return { checkedSlideIds: [...new Set([...s.checkedSlideIds, ...range])], checkAnchorId: id };
     }),
   setCheckedSlides: (checkedSlideIds) => set({ checkedSlideIds }),
   selectBlock: (selectedBlockId) => set({ selectedBlockId }),
@@ -82,6 +88,7 @@ export const useUi = create<UiStore>((set) => ({
       imported: false,
       selectedSlideId: null,
       checkedSlideIds: [],
+      checkAnchorId: null,
       selectedBlockId: null,
       mode: 'edit',
       modal: null,

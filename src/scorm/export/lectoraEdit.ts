@@ -8,6 +8,7 @@
 
 import type JSZip from 'jszip';
 import { decryptTest, encryptTest, findTestPassphrase } from '@/scorm/edit/lectoraTestCrypto';
+import { dirname, join } from '@/scorm/import/paths';
 
 const NEXT_RE = /function\s+trivNextPage\(\)\s*\{\s*trivExitPage\(\s*'([^']+)'/;
 const PREV_RE = /function\s+trivPrevPage\(\)\s*\{\s*trivExitPage\(\s*'([^']+)'/;
@@ -15,6 +16,154 @@ const NEXT_CALL_RE = /(function\s+trivNextPage\(\)\s*\{\s*)trivExitPage\([^()]*\
 const PREV_CALL_RE = /(function\s+trivPrevPage\(\)\s*\{\s*)trivExitPage\([^()]*\)/;
 const PAGENUM_RE = /PageInChapter\.set\(\s*'(\d+)'/;
 const PAGESTOT_RE = /PagesInChapter\.set\(\s*'(\d+)'/;
+
+// Pages a page shows inside a panel rather than navigates to — Lectora's table of
+// contents is its own page (a001_toc<n>.html) loaded into a frame on every page
+// with toc<n>.load('...'). They aren't slides: removing one and re-pointing the
+// panel at a content page makes every slide run a second copy of that slide
+// inside its TOC panel (it restarts continuously, narration and all).
+const EMBED_RE = /\b\w+\.load\(\s*'([^']+\.html?)'|<i?frame\b[^>]*\bsrc\s*=\s*["']([^"']+\.html?)/gi;
+
+/** Package paths of the pages `html` (at `path`) embeds in a panel or frame. */
+export function embeddedPages(path: string, html: string): string[] {
+  return [...html.matchAll(EMBED_RE)].map((m) => join(dirname(path), m[1] ?? m[2]));
+}
+
+/**
+ * Sections ("chapters") of a Lectora course, from its table of contents pages:
+ * each top-level TOC folder is a section; the pages listed under it (at any
+ * depth) belong to it. Returns page path → section title. When a course has
+ * several TOC pages, the fullest one wins and the others only fill gaps.
+ */
+export function lectoraSections(pages: Map<string, string>): Map<string, string> {
+  const FOLDER = /^\s*(\w+)\s*=\s*insertFolder\(\s*(\w+)\s*,\s*NewFolder\(\s*"((?:[^"\\]|\\.)*)"\s*,\s*"([^"]*)"/;
+  const LINK = /^\s*insertEntry\(\s*(\w+)\s*,\s*NewLink\(\s*"(?:[^"\\]|\\.)*"\s*,\s*"([^"]+)"/;
+  const tocs: Array<Map<string, string>> = [];
+  for (const [path, html] of pages) {
+    if (!/insertFolder\(/.test(html) || !/NewLink\(/.test(html)) continue;
+    const top = new Map<string, string>(); // folder variable → its top-level section
+    const out = new Map<string, string>();
+    const at = (rel: string) => join(dirname(path), rel);
+    for (const line of html.split('\n')) {
+      const f = FOLDER.exec(line);
+      if (f) {
+        const [, v, parent, rawTitle, first] = f;
+        const title = top.get(parent) ?? rawTitle.replace(/<[^>]*>/g, '').replace(/\\(.)/g, '$1').trim();
+        if (top.has(parent) || /^fT$/.test(parent) || !top.size) top.set(v, title);
+        if (first && !out.has(at(first))) out.set(at(first), title);
+        continue;
+      }
+      const l = LINK.exec(line);
+      if (l && top.has(l[1])) out.set(at(l[2]), top.get(l[1])!);
+    }
+    if (out.size) tocs.push(out);
+  }
+  tocs.sort((a, b) => b.size - a.size);
+  const sections = new Map<string, string>();
+  for (const t of tocs) for (const [p, sec] of t) if (!sections.has(p)) sections.set(p, sec);
+  // Pages the TOC doesn't list but whose name extends a listed page's belong with
+  // it — a test lists only its intro (a001_test_module_1.html), not its question
+  // pages (a001_test_module_1_tmal1_m1_p12.html).
+  const stem = (p: string) => p.replace(/\.html?$/i, '');
+  const listed = [...sections.keys()].sort((a, b) => stem(b).length - stem(a).length);
+  for (const p of pages.keys()) {
+    if (sections.has(p)) continue;
+    const owner = listed.find((q) => stem(p).startsWith(stem(q) + '_'));
+    if (owner) sections.set(p, sections.get(owner)!);
+  }
+  return sections;
+}
+
+const EXIT_TARGET_RE = /trivExitPage\(\s*\\?'([^'\\]+\.html?)\\?'/g;
+
+/**
+ * Lectora pages in course order: from the page the launcher opens, along each
+ * page's Next chain, then into pages reached any other way (menu / dashboard
+ * buttons, jumps) in the order they're linked. Pages never reached come last.
+ */
+export function lectoraCourseOrder(pages: Map<string, string>, launchPath: string | null): string[] {
+  const nextOf = (p: string) => {
+    const n = NEXT_RE.exec(pages.get(p) ?? '')?.[1];
+    return n ? join(dirname(p), n) : undefined;
+  };
+  const launchHtml = launchPath ? pages.get(launchPath) : undefined;
+  const redir = launchHtml ? [...launchHtml.matchAll(/redirPage\s*=\s*'([^']+\.html?)'/g)].pop()?.[1] : undefined;
+  const nexts = new Set([...pages.keys()].map(nextOf).filter(Boolean));
+  const start = (redir && join(dirname(launchPath!), redir)) || [...pages.keys()].find((p) => nextOf(p) && !nexts.has(p));
+
+  const order: string[] = [];
+  const seen = new Set<string>();
+  const walk = (from: string | undefined) => {
+    for (let c = from; c && pages.has(c) && !seen.has(c); c = nextOf(c)) {
+      seen.add(c);
+      order.push(c);
+    }
+  };
+  if (launchPath && pages.has(launchPath)) {
+    seen.add(launchPath);
+    order.push(launchPath);
+  }
+  walk(start);
+  for (let i = 0; i < order.length; i++) {
+    for (const m of (pages.get(order[i]) ?? '').matchAll(EXIT_TARGET_RE)) walk(join(dirname(order[i]), m[1]));
+  }
+  for (const p of pages.keys()) if (!seen.has(p)) order.push(p);
+  return order;
+}
+
+// Lectora courses can lock a feature until the learner reaches a page — TMA's
+// "unLockTOC" variable is set to '1' only on the Module Summary page, and until
+// then the Table of Contents button just says "available after you have
+// completed all of the modules". Delete that page and the feature stays locked
+// for good, so we find such variables and can start them unlocked instead.
+export interface LostUnlock {
+  /** Lectora variable, without the "Var" prefix (e.g. "unLockTOC") */
+  variable: string;
+  /** what it unlocks, for people ("the table of contents") */
+  label: string;
+  /** the value the removed pages set it to (e.g. "1") */
+  value: string;
+  /** the removed pages that were the only ones setting it */
+  pages: string[];
+  /** their page titles, for people */
+  titles: string[];
+}
+
+const UNLOCK_SET_RE = /\bVar(\w*unlock\w*)\.set\(\s*'([^']+)'/gi;
+
+/** Unlock variables that only removed pages set, and remaining pages still check. */
+export function findLostUnlocks(pages: Map<string, string>, removed: Set<string>): LostUnlock[] {
+  const setters = new Map<string, { value: string; pages: Set<string> }>();
+  for (const [p, h] of pages) {
+    for (const m of h.matchAll(UNLOCK_SET_RE)) {
+      if (/reset/i.test(m[1])) continue; // "resetunlockTOC" and the like are admin switches
+      const e = setters.get(m[1]) ?? { value: m[2], pages: new Set() };
+      e.pages.add(p);
+      setters.set(m[1], e);
+    }
+  }
+  const lost: LostUnlock[] = [];
+  for (const [variable, { value, pages: by }] of setters) {
+    if (![...by].every((p) => removed.has(p))) continue;
+    const checked = new RegExp(`\\bVar${variable}\\.(?:contains|equals|greaterThan|lessThan)\\(`);
+    if (![...pages].some(([p, h]) => !removed.has(p) && checked.test(h))) continue;
+    const titles = [...by].map((p) => (/<title>([^<]*)/i.exec(pages.get(p) ?? '')?.[1] ?? '').trim() || p.replace(/^.*\//, ''));
+    lost.push({ variable, label: /toc/i.test(variable) ? 'the table of contents' : `“${variable}”`, value, pages: [...by], titles });
+  }
+  return lost;
+}
+
+/** Start the given variables at their unlocked value in a page's declarations:
+ *  VarunLockTOC = new Variable( 'VarunLockTOC', '0', ... ) → '1'. Learners who
+ *  already have saved progress in the LMS keep their saved value. */
+export function startUnlocked(html: string, unlocks: Array<Pick<LostUnlock, 'variable' | 'value'>>): string {
+  let out = html;
+  for (const u of unlocks) {
+    const decl = new RegExp(`(new\\s+Variable\\(\\s*'Var${u.variable}'\\s*,\\s*')[^']*'`, 'g');
+    out = out.replace(decl, (_m, a: string) => `${a}${u.value.replace(/[$\\']/g, '')}'`);
+  }
+  return out;
+}
 
 interface Nav {
   prev?: string;
@@ -129,6 +278,34 @@ function pruneTestXml(xml: string, removed: Set<string>, nearest: (p: string) =>
   return out;
 }
 
+/** TOC sections ("chapter" folders) whose own page was removed: drop the folder
+ *  when none of its pages are left, else point it at its first remaining page.
+ *  A folder's entries are the lines that add to its variable until it's reused:
+ *    aux1 = insertFolder(fT, NewFolder("Technology", "a001_technology_welcome.html", ...))
+ *    insertEntry(aux1, NewLink("Welcome", "a001_technology_welcome.html", ...)) */
+function pruneTocFolders(toc: string, removed: Set<string>): string {
+  const lines = toc.split(/(?<=\n)/);
+  const FOLDER = /^\s*(\w+)\s*=\s*insertFolder\(\s*\w+\s*,\s*NewFolder\(\s*"(?:[^"\\]|\\.)*"\s*,\s*"([^"]*)"/;
+  const drop = new Set<number>();
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = FOLDER.exec(lines[i]);
+    if (!m || !removed.has(m[2])) continue;
+    const v = m[1];
+    const uses = new RegExp(`\\(\\s*${v}\\s*,`);
+    const reassigned = new RegExp(`^\\s*${v}\\s*=`);
+    let first: string | undefined;
+    let used = false;
+    for (let j = i + 1; j < lines.length && !reassigned.test(lines[j]); j++) {
+      if (drop.has(j) || !uses.test(lines[j])) continue;
+      used = true;
+      first ??= /New(?:Link|Folder)\(\s*"(?:[^"\\]|\\.)*"\s*,\s*"([^"]+)"/.exec(lines[j])?.[1];
+    }
+    if (!used) drop.add(i);
+    else if (first) lines[i] = lines[i].replace(`"${m[2]}"`, `"${first}"`);
+  }
+  return lines.filter((_, i) => !drop.has(i)).join('');
+}
+
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
@@ -157,6 +334,19 @@ export async function planLectoraDeletions(srcZip: JSZip, removedSet: Set<string
   const removed = new Set([...removedSet].filter((p) => nav.has(p)));
   if (!removed.size) return null;
   const warnings: LectoraEdits['warnings'] = [];
+
+  // Panel pages (the table of contents) that remaining pages still show are kept.
+  const embedded = new Set<string>();
+  for (const [p, h] of text) if (!removed.has(p)) embeddedPages(p, h).forEach((e) => embedded.add(e));
+  const panels = [...removed].filter((p) => embedded.has(p));
+  if (panels.length) {
+    panels.forEach((p) => removed.delete(p));
+    warnings.push({
+      message: `${panels.length === 1 ? 'A table of contents page was' : `${panels.length} table of contents pages were`} kept, because the remaining slides show ${panels.length === 1 ? 'it' : 'them'} in a panel.`,
+      detail: 'Deleted slides are removed from its list. Kept: ' + panels.map((p) => p.replace(/^.*\//, '')).join(', '),
+    });
+  }
+  if (!removed.size) return { rewrites: new Map(), removed, warnings };
 
   // Course tests. Deleted question pages come out of the test's list too. An
   // encrypted test is decrypted with the course's own player passphrase; if that
@@ -318,6 +508,7 @@ export async function planLectoraDeletions(srcZip: JSZip, removedSet: Set<string
       for (const r of removed) {
         h = h.replace(new RegExp(`^.*NewLink\\([^\\n]*${esc(r)}[^\\n]*\\r?\\n`, 'gm'), '');
       }
+      h = pruneTocFolders(h, removed);
     }
 
     // direct jumps (Back buttons, auto-advance when narration ends, ...) keep their

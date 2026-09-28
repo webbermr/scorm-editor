@@ -14,7 +14,7 @@ interface Props {
   multi: boolean;
   dropBefore: boolean;
   onSelect: (id: string, e: React.MouseEvent) => void;
-  onToggle: (id: string) => void;
+  onToggle: (id: string, e: React.MouseEvent) => void;
   onDelete: (id: string) => void;
   onDuplicate: (id: string) => void;
 }
@@ -28,6 +28,7 @@ export function SlideCard({ slide, index, selected, checked, multi, dropBefore, 
     <div
       ref={setNodeRef}
       className="slide-card"
+      data-slide-id={slide.id}
       onClick={(e) => onSelect(slide.id, e)}
       style={{
         transform: CSS.Transform.toString(transform),
@@ -75,7 +76,7 @@ export function SlideCard({ slide, index, selected, checked, multi, dropBefore, 
           className={'slide-check' + (multi ? ' show' : '') + (checked ? ' on' : '')}
           onClick={(e) => {
             e.stopPropagation();
-            onToggle(slide.id);
+            onToggle(slide.id, e);
           }}
         >
           {checked && <Icon name="check" size={11} />}

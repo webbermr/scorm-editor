@@ -119,6 +119,10 @@ export function ExportModal() {
   // on by default where we've verified it on real courses (Lectora)
   const [removeUnused, setRemoveUnused] = useState(course.meta.authoringTool === 'Lectora');
   const [savings, setSavings] = useState<MediaSavings | 'checking' | 'failed'>('checking');
+  // features (the table of contents) only deleted slides unlocked: start them
+  // unlocked by default, since otherwise learners can never use them
+  const [unlockLost, setUnlockLost] = useState(true);
+  const lostUnlocks = mode === 'original' && typeof savings === 'object' ? savings.lostUnlocks : [];
   const [phase, setPhase] = useState<Phase>('config');
   const [error, setError] = useState<string>('');
   const [report, setReport] = useState<ValidationReport | null>(null);
@@ -152,7 +156,7 @@ export function ExportModal() {
     setPhase('building');
     setError('');
     try {
-      const result = await buildScormPackage(course, { name, version: effectiveVersion, mode, ...opts, removeUnusedMedia: removeUnused }, originalFile, removedPages);
+      const result = await buildScormPackage(course, { name, version: effectiveVersion, mode, ...opts, removeUnusedMedia: removeUnused, unlockLostFeatures: unlockLost }, originalFile, removedPages);
       resultRef.current = result;
       setReport(result.report);
       setPhase('review');
@@ -222,6 +226,33 @@ export function ExportModal() {
               ))}
             </div>
           </div>
+          {lostUnlocks.map((u) => (
+            <div key={u.variable} className="card" style={{ padding: '12px 14px', marginBottom: 16, background: 'var(--amber-soft)', borderColor: 'transparent' }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <Icon name="warning" size={17} style={{ color: 'var(--amber)', flexShrink: 0, marginTop: 1 }} />
+                <div style={{ flex: 1, fontSize: 13, lineHeight: 1.45, color: 'var(--ink)' }}>
+                  <strong>You deleted the slide that unlocks {u.label}</strong> ({u.titles.join(', ')}).{' '}
+                  {unlockLost
+                    ? `It will be unlocked from the start, so learners can open it on any slide.`
+                    : `Learners will never be able to open it: they’ll only see the “not available yet” message.`}
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, paddingLeft: 27 }}>
+                <span style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  Unlock {u.label} from the start
+                  <HelpTip label={`Unlock ${u.label}`}>
+                    <p>
+                      This course keeps {u.label} locked until the learner reaches “{u.titles.join(', ')}”. That slide is deleted, so without this it stays
+                      locked for good.
+                    </p>
+                    <p>Turning this on makes it available from the first slide. Learners who already have saved progress in your LMS keep their saved state.</p>
+                  </HelpTip>
+                </span>
+                <Toggle on={unlockLost} onChange={() => setUnlockLost((v) => !v)} />
+              </div>
+            </div>
+          ))}
+
           <label className="field-label">Options</label>
           <div className="card" style={{ padding: '4px 14px', marginBottom: 18 }}>
             {mode === 'original' && (

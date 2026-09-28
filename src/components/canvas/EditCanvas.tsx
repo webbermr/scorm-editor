@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { TYPE_META } from '@/lib/typeMeta';
 import { useUi } from '@/store/uiStore';
@@ -59,11 +59,31 @@ export function EditCanvas({ slide, slideIndex, total }: Props) {
   const [editText, setEditText] = useState(false);
   const canEditText = authoringTool === 'Lectora';
   const editCount = useCourse((s) => s.course.textEdits?.length ?? 0);
-  // reset to the editable view whenever the selected slide changes
+  // slide the preview moved to by itself (course playback), selected to follow it
+  const followedRef = useRef<string | null>(null);
+  // the card is re-created (and animates in) per slide the user picks — but not
+  // while following playback, which would reload the preview and restart the slide
+  const cardKeyRef = useRef(slide.id);
+  if (followedRef.current !== slide.id) cardKeyRef.current = slide.id;
+  // reset to the editable view whenever the user selects another slide — but not
+  // when the selection is just following the course playing in LMS Preview
   useEffect(() => {
+    if (followedRef.current === slide.id) {
+      followedRef.current = null;
+      return;
+    }
     setView('blocks');
     setEditText(false);
   }, [slide.id]);
+
+  // The course moved to another page (Next, narration auto-advance, menus): select
+  // that slide so the slide list and "Slide n of n" show what's playing.
+  const onPageChange = useCallback((href: string) => {
+    const target = useCourse.getState().course.slides.find((s) => s.sourceHref === href);
+    if (!target || target.id === useUi.getState().selectedSlideId) return;
+    followedRef.current = target.id;
+    useUi.getState().selectSlide(target.id);
+  }, []);
 
   // Stable handlers (read the store directly) — course-wide edits keyed by element id.
   const getEdits = useCallback((): InlineEdit[] => useCourse.getState().course.textEdits ?? [], []);
@@ -76,7 +96,7 @@ export function EditCanvas({ slide, slideIndex, total }: Props) {
   return (
     <div style={{ flex: 1, padding: '30px 40px', display: 'flex', justifyContent: 'center' }} onMouseDown={() => selectBlock(null)}>
       <div
-        key={slide.id}
+        key={cardKeyRef.current}
         className="card"
         style={{
           width: '100%',
@@ -141,7 +161,7 @@ export function EditCanvas({ slide, slideIndex, total }: Props) {
         </div>
 
         {view === 'original' && hasOriginal ? (
-          <OriginalView href={slide.sourceHref ?? null} title={slide.name} editable={editText} getEdits={getEdits} onEdit={onEdit} />
+          <OriginalView href={slide.sourceHref ?? null} title={slide.name} editable={editText} getEdits={getEdits} onEdit={onEdit} onPageChange={onPageChange} />
         ) : (
           <div onMouseDown={(e) => e.stopPropagation()}>
             <SlideBody slide={slide} editing />

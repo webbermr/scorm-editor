@@ -6,7 +6,7 @@ import { slideToHtml, mediaSectionHtml, SHARED_CSS, scormApiJs, type MediaRef } 
 import { buildManifest, type SlideResource } from './buildManifest';
 import { parseManifest } from '@/scorm/import/parseManifest';
 import { dirname, join } from '@/scorm/import/paths';
-import { planLectoraDeletions, type LectoraEdits } from './lectoraEdit';
+import { findLostUnlocks, planLectoraDeletions, startUnlocked, type LectoraEdits, type LostUnlock } from './lectoraEdit';
 import { planMediaPrune, type MediaPrune } from './pruneMedia';
 import { validatePackage, noteSize, type ValidationReport } from './validate';
 import { applyTextEdits } from '@/scorm/edit/lectoraSource';
@@ -28,6 +28,9 @@ export interface ExportOptions {
   mode: 'blocks' | 'original';
   /** faithful copy only: also leave out media nothing in the course uses */
   removeUnusedMedia?: boolean;
+  /** faithful copy only: features (e.g. the table of contents) whose unlocking
+   *  page was deleted start unlocked, instead of staying locked for good */
+  unlockLostFeatures?: boolean;
 }
 
 export interface ExportResult {
@@ -266,10 +269,19 @@ async function planOriginalEdits(src: JSZip, course: Course, removedPages: strin
     skip: new Set(manifestPath ? [manifestPath] : []),
     unused: removeUnused,
   });
-  return { manifestPath, edits, media };
+  // ...and features only the removed pages unlocked (e.g. the table of contents)
+  let lostUnlocks: LostUnlock[] = [];
+  if (edits?.removed.size) {
+    const pages = new Map<string, string>();
+    for (const p of Object.keys(src.files)) if (/\.html?$/i.test(p) && !src.files[p].dir) pages.set(p, await src.file(p)!.async('string'));
+    lostUnlocks = findLostUnlocks(pages, edits.removed);
+  }
+  return { manifestPath, edits, media, lostUnlocks };
 }
 
 export interface MediaSavings {
+  /** features only deleted slides unlocked — locked for good unless unlockLostFeatures */
+  lostUnlocks: LostUnlock[];
   /** media only deleted slides used — always left out */
   deletedSlides: { files: number; bytes: number };
   /** media nothing in the course uses — left out with removeUnusedMedia */
@@ -281,8 +293,9 @@ export interface MediaSavings {
 /** How much media a faithful-copy export leaves out, for the export dialog. */
 export async function estimateMediaSavings(course: Course, originalFile: File, removedPages?: string[]): Promise<MediaSavings> {
   const src = await JSZip.loadAsync(originalFile);
-  const { media } = await planOriginalEdits(src, course, removedPages, true);
+  const { media, lostUnlocks } = await planOriginalEdits(src, course, removedPages, true);
   return {
+    lostUnlocks,
     deletedSlides: { files: media.removed.size, bytes: media.bytes },
     unused: { files: media.unused.size, bytes: media.unusedBytes },
     unusedSkipped: media.unusedSkipped,
@@ -296,7 +309,8 @@ export async function estimateMediaSavings(course: Course, originalFile: File, r
 async function buildOriginalPackage(course: Course, opts: ExportOptions, originalFile: File, removedPages?: string[]): Promise<ExportResult> {
   const src = await JSZip.loadAsync(originalFile);
   const out = new JSZip();
-  const { manifestPath, edits, media } = await planOriginalEdits(src, course, removedPages, !!opts.removeUnusedMedia);
+  const { manifestPath, edits, media, lostUnlocks } = await planOriginalEdits(src, course, removedPages, !!opts.removeUnusedMedia);
+  const unlocks = opts.unlockLostFeatures ? lostUnlocks : [];
 
   // Global in-place text edits (keyed by element id). Applied to every source page
   // that contains the element — shared chrome and single-page (titlemgr) builds both
@@ -304,6 +318,14 @@ async function buildOriginalPackage(course: Course, opts: ExportOptions, origina
   const textEdits = course.textEdits ?? [];
   const isHtml = (p: string) => /\.html?$/i.test(p);
   const decoder = new TextDecoder('utf-8');
+
+  // page-source changes on top of nav surgery: text edits, then unlocked features
+  const editPage = (html: string): string => {
+    let out = textEdits.length ? applyTextEdits(html, textEdits).source : html;
+    if (unlocks.length) out = startUnlocked(out, unlocks);
+    return out;
+  };
+  const editsPages = textEdits.length > 0 || unlocks.length > 0;
 
   const tasks: Promise<void>[] = [];
   src.forEach((path, entry) => {
@@ -314,17 +336,17 @@ async function buildOriginalPackage(course: Course, opts: ExportOptions, origina
     if (path === 'scorm-editor/slides.json') return; // stale slide list from older exports
     if (edits?.rewrites.has(path)) {
       // page already rewritten by nav surgery — apply text edits on top of it
-      let content = edits.rewrites.get(path)!;
-      if (textEdits.length && isHtml(path)) content = applyTextEdits(content, textEdits).source;
-      out.file(path, content);
+      const content = edits.rewrites.get(path)!;
+      out.file(path, isHtml(path) ? editPage(content) : content);
       return;
     }
-    if (textEdits.length && isHtml(path)) {
+    if (editsPages && isHtml(path)) {
       tasks.push(
         entry.async('uint8array').then((data) => {
-          const r = applyTextEdits(decoder.decode(data), textEdits);
+          const html = decoder.decode(data);
+          const edited = editPage(html);
           // keep unchanged pages byte-identical; only rewrite pages we actually touched
-          out.file(path, r.applied.length ? r.source : data);
+          out.file(path, edited !== html ? edited : data);
         }),
       );
       return;
@@ -370,6 +392,18 @@ async function buildOriginalPackage(course: Course, opts: ExportOptions, origina
   if (media.unused.size) {
     const n = media.unused.size;
     report.checks.push({ label: `Removed ${n} unused media file${n === 1 ? '' : 's'} (${humanSize(media.unusedBytes)})`, passed: true });
+  }
+  for (const u of lostUnlocks) {
+    const what = u.label.charAt(0).toUpperCase() + u.label.slice(1);
+    const by = u.titles.join(', ');
+    if (opts.unlockLostFeatures) report.checks.push({ label: `${what} is unlocked from the start (its unlocking page was deleted)`, passed: true });
+    else
+      report.warnings.push({
+        level: 'warning',
+        code: 'feature-locked',
+        message: `${what} will stay locked for learners: the only page that unlocks it was deleted.`,
+        detail: `Deleted unlocking page: ${by}. Turn on “Unlock ${u.label}” when exporting, or keep that slide.`,
+      });
   }
   if (media.unusedSkipped) report.warnings.push({ level: 'warning', code: 'unused-media-skipped', message: 'Unused media was kept.', detail: media.unusedSkipped });
   if (media.uncertain.length) {
