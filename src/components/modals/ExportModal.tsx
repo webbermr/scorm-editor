@@ -1,11 +1,13 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { Modal, ModalHead } from './Modal';
 import { Toggle } from '@/components/ui/Toggle';
+import { HelpTip } from '@/components/ui/HelpTip';
 import { useCourse } from '@/store/courseStore';
 import { useUi } from '@/store/uiStore';
 import { usePreview } from '@/store/previewStore';
-import { buildScormPackage, downloadBlob, type ExportResult, type ValidationReport } from '@/scorm/export';
+import { buildScormPackage, downloadBlob, estimateMediaSavings, type ExportResult, type MediaSavings, type ValidationReport } from '@/scorm/export';
+import { humanSize } from '@/scorm/export/validate';
 import type { ScormVersion } from '@/types/course';
 
 type Phase = 'config' | 'building' | 'review' | 'error';
@@ -24,11 +26,83 @@ const MODE_OPTIONS: Array<{ id: Mode; label: string; desc: string }> = [
   },
 ];
 
-const OPTION_ROWS: Array<['manifest' | 'minify' | 'includeSource', string]> = [
-  ['manifest', 'Regenerate imsmanifest.xml'],
-  ['minify', 'Minify HTML & assets'],
-  ['includeSource', 'Include editable source files'],
+// Help text shown behind the (i) next to each export setting.
+const MODE_HELP = (
+  <>
+    <p>
+      <strong>Faithful copy</strong> creates a copy of the original package with the same player, design, images, audio and narration. Only these edits
+      are applied:
+    </p>
+    <ul>
+      <li>Text changed with “Edit text” in LMS Preview (Lectora courses)</li>
+      <li>Deleted slides (Lectora courses only; other tools export every page)</li>
+      <li>Course title, and passing score if the original package sets one</li>
+    </ul>
+    <p>
+      Changes made in the Blocks view, reordering and new slides are <strong>not</strong> included.
+    </p>
+    <p>
+      <strong>Rebuilt</strong> creates a new course with one simple page per slide, using your Blocks-view text, slide order and new slides, plus the
+      images and narration taken from the original pages. “Edit text” changes aren’t carried over. It’s ready for any LMS but looks plain, not like
+      the original.
+    </p>
+  </>
+);
+
+const NAME_HELP = (
+  <p>
+    The name of the downloaded .zip file. It doesn’t change the course title learners see in the LMS; edit that in the title field at the top of the
+    editor.
+  </p>
+);
+
+const VERSION_HELP = (
+  <>
+    <p>The SCORM standard your LMS uses to launch the course and record completion and scores.</p>
+    <p>
+      <strong>SCORM 1.2</strong> works in almost every LMS. Choose <strong>SCORM 2004</strong> only if your LMS requires it.
+    </p>
+    <p>A Faithful copy always keeps the version of the original package.</p>
+  </>
+);
+
+const OPTION_ROWS: Array<['manifest' | 'minify' | 'includeSource', string, React.ReactNode]> = [
+  ['manifest', 'Regenerate imsmanifest.xml', null],
+  [
+    'minify',
+    'Maximum compression',
+    <p key="m">
+      Compresses the .zip as much as possible so it uploads faster. The course itself is unchanged. Images and audio are already compressed, so the file
+      usually shrinks only a little.
+    </p>,
+  ],
+  [
+    'includeSource',
+    'Include editor data (course.json)',
+    <>
+      <p>Adds a course.json file with the editor’s copy of your slides and course settings, for your records or other tools.</p>
+      <p>The LMS ignores it, and importing the package here again does not read it, so it won’t restore your edits.</p>
+    </>,
+  ],
 ];
+
+const UNUSED_MEDIA_HELP = (
+  <>
+    <p>
+      Leaves out images, audio and video that nothing in the course uses. Authoring tools often publish media the course no longer needs, such as
+      narration from other modules or images replaced in later versions.
+    </p>
+    <p>
+      A file counts as unused only when its name appears nowhere else in the package: not in any page, script, style sheet or data file, including the
+      course test. Anything the course mentions, even indirectly, is kept.
+    </p>
+    <p>Media used only by slides you deleted is always removed, whether or not this is on.</p>
+  </>
+);
+
+const count = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
+
+const labelRow = { display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 } as const;
 
 export function ExportModal() {
   const course = useCourse((s) => s.course);
@@ -42,6 +116,13 @@ export function ExportModal() {
   const [version, setVersion] = useState<ScormVersion>(course.meta.scormVersion);
   const [name, setName] = useState(course.meta.package.replace(/\.zip$/, ''));
   const [opts, setOpts] = useState({ minify: true, includeSource: false, manifest: true });
+  // on by default where we've verified it on real courses (Lectora)
+  const [removeUnused, setRemoveUnused] = useState(course.meta.authoringTool === 'Lectora');
+  const [savings, setSavings] = useState<MediaSavings | 'checking' | 'failed'>('checking');
+  // features (the table of contents) only deleted slides unlocked: start them
+  // unlocked by default, since otherwise learners can never use them
+  const [unlockLost, setUnlockLost] = useState(true);
+  const lostUnlocks = mode === 'original' && typeof savings === 'object' ? savings.lostUnlocks : [];
   const [phase, setPhase] = useState<Phase>('config');
   const [error, setError] = useState<string>('');
   const [report, setReport] = useState<ValidationReport | null>(null);
@@ -56,11 +137,26 @@ export function ExportModal() {
     return usePreview.getState().importedPages.filter((p) => !kept.has(p));
   })();
 
+  // how much media the faithful copy leaves out — shown next to the option
+  const removedKey = removedPages.join('\n');
+  useEffect(() => {
+    if (mode !== 'original' || !originalFile) return;
+    let live = true;
+    setSavings('checking');
+    estimateMediaSavings(course, originalFile, removedPages)
+      .then((s) => live && setSavings(s))
+      .catch(() => live && setSavings('failed'));
+    return () => {
+      live = false;
+    };
+    // re-run only when the package or the deleted pages change
+  }, [mode, originalFile, removedKey]);
+
   const build = async () => {
     setPhase('building');
     setError('');
     try {
-      const result = await buildScormPackage(course, { name, version: effectiveVersion, mode, ...opts }, originalFile, removedPages);
+      const result = await buildScormPackage(course, { name, version: effectiveVersion, mode, ...opts, removeUnusedMedia: removeUnused, unlockLostFeatures: unlockLost }, originalFile, removedPages);
       resultRef.current = result;
       setReport(result.report);
       setPhase('review');
@@ -86,8 +182,13 @@ export function ExportModal() {
         <div style={{ padding: 22 }}>
           {hasOriginal && (
             <div style={{ marginBottom: 16 }}>
-              <label className="field-label">What to export</label>
-              <select className="field" value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
+              <div style={labelRow}>
+                <label className="field-label" htmlFor="export-mode" style={{ marginBottom: 0 }}>
+                  What to export
+                </label>
+                <HelpTip label="What to export">{MODE_HELP}</HelpTip>
+              </div>
+              <select id="export-mode" className="field" value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
                 {MODE_OPTIONS.map((o) => (
                   <option key={o.id} value={o.id}>
                     {o.label}
@@ -99,14 +200,24 @@ export function ExportModal() {
           )}
 
           <div style={{ marginBottom: 16 }}>
-            <label className="field-label">Package name</label>
+            <div style={labelRow}>
+              <label className="field-label" htmlFor="export-name" style={{ marginBottom: 0 }}>
+                Package name
+              </label>
+              <HelpTip label="Package name">{NAME_HELP}</HelpTip>
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
-              <input className="field" value={name} onChange={(e) => setName(e.target.value)} style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }} />
+              <input id="export-name" className="field" value={name} onChange={(e) => setName(e.target.value)} style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }} />
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--ink-3)', padding: '9px 12px', border: '1px solid var(--line)', borderLeft: 'none', borderRadius: '0 var(--r-md) var(--r-md) 0', background: 'var(--surface-sunk)' }}>.zip</span>
             </div>
           </div>
           <div style={{ marginBottom: 16 }}>
-            <label className="field-label">SCORM version{mode === 'original' ? ' (kept from source)' : ''}</label>
+            <div style={labelRow}>
+              <span className="field-label" style={{ marginBottom: 0 }}>
+                SCORM version{mode === 'original' ? ' (kept from source)' : ''}
+              </span>
+              <HelpTip label="SCORM version">{VERSION_HELP}</HelpTip>
+            </div>
             <div className="seg" style={{ width: '100%', opacity: mode === 'original' ? 0.55 : 1 }}>
               {([['1.2', 'SCORM 1.2'], ['2004', 'SCORM 2004']] as const).map(([v, lbl]) => (
                 <button key={v} className={effectiveVersion === v ? 'on' : ''} style={{ flex: 1, justifyContent: 'center' }} disabled={mode === 'original'} onClick={() => setVersion(v)}>
@@ -115,11 +226,55 @@ export function ExportModal() {
               ))}
             </div>
           </div>
+          {lostUnlocks.map((u) => (
+            <div key={u.variable} className="card" style={{ padding: '12px 14px', marginBottom: 16, background: 'var(--amber-soft)', borderColor: 'transparent' }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <Icon name="warning" size={17} style={{ color: 'var(--amber)', flexShrink: 0, marginTop: 1 }} />
+                <div style={{ flex: 1, fontSize: 13, lineHeight: 1.45, color: 'var(--ink)' }}>
+                  <strong>You deleted the slide that unlocks {u.label}</strong> ({u.titles.join(', ')}).{' '}
+                  {unlockLost
+                    ? `It will be unlocked from the start, so learners can open it on any slide.`
+                    : `Learners will never be able to open it: they’ll only see the “not available yet” message.`}
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, paddingLeft: 27 }}>
+                <span style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  Unlock {u.label} from the start
+                  <HelpTip label={`Unlock ${u.label}`}>
+                    <p>
+                      This course keeps {u.label} locked until the learner reaches “{u.titles.join(', ')}”. That slide is deleted, so without this it stays
+                      locked for good.
+                    </p>
+                    <p>Turning this on makes it available from the first slide. Learners who already have saved progress in your LMS keep their saved state.</p>
+                  </HelpTip>
+                </span>
+                <Toggle on={unlockLost} onChange={() => setUnlockLost((v) => !v)} />
+              </div>
+            </div>
+          ))}
+
           <label className="field-label">Options</label>
           <div className="card" style={{ padding: '4px 14px', marginBottom: 18 }}>
-            {OPTION_ROWS.filter(([k]) => k !== 'manifest').map(([k, lbl], i, arr) => (
+            {mode === 'original' && (
+              <div style={{ padding: '11px 0', borderBottom: '1px solid var(--line)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    Remove unused media
+                    <HelpTip label="Remove unused media">{UNUSED_MEDIA_HELP}</HelpTip>
+                  </span>
+                  {typeof savings === 'object' && !savings.unusedSkipped && savings.unused.files > 0 && (
+                    <Toggle on={removeUnused} onChange={() => setRemoveUnused((v) => !v)} />
+                  )}
+                </div>
+                <MediaSavingsNote savings={savings} on={removeUnused} />
+              </div>
+            )}
+            {OPTION_ROWS.filter(([k]) => k !== 'manifest').map(([k, lbl, help], i, arr) => (
               <div key={k} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--line)' : 'none' }}>
-                <span style={{ fontSize: 13.5 }}>{lbl}</span>
+                <span style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {lbl}
+                  {help && <HelpTip label={lbl}>{help}</HelpTip>}
+                </span>
                 <Toggle on={opts[k]} onChange={() => setOpts((o) => ({ ...o, [k]: !o[k] }))} />
               </div>
             ))}
@@ -175,6 +330,31 @@ export function ExportModal() {
         </div>
       )}
     </Modal>
+  );
+}
+
+function MediaSavingsNote({ savings, on }: { savings: MediaSavings | 'checking' | 'failed'; on: boolean }) {
+  const style = { fontSize: 12, color: 'var(--ink-3)', marginTop: 4, lineHeight: 1.45 } as const;
+  if (savings === 'checking') return <div style={style}>Checking the course for unused media…</div>;
+  if (savings === 'failed') return <div style={style}>Couldn’t check this course for unused media.</div>;
+  const { unused, deletedSlides } = savings;
+  const main = savings.unusedSkipped
+    ? 'Not available: the course’s test file couldn’t be read, and it might be the only file that uses some media.'
+    : unused.files === 0
+      ? 'No unused media found.'
+      : on
+        ? `Makes the package about ${humanSize(unused.bytes)} smaller (${count(unused.files, 'file')} nothing in the course uses).`
+        : `Would make the package about ${humanSize(unused.bytes)} smaller (${count(unused.files, 'file')} nothing in the course uses).`;
+  return (
+    <div style={style}>
+      {main}
+      {deletedSlides.files > 0 && (
+        <>
+          {' '}
+          Media used only by deleted slides ({humanSize(deletedSlides.bytes)}, {count(deletedSlides.files, 'file')}) is always removed.
+        </>
+      )}
+    </div>
   );
 }
 

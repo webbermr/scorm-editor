@@ -7,6 +7,8 @@ import { parseManifest, type ParsedManifest } from './parseManifest';
 import { htmlToBlocks, type DecomposeResult } from './htmlToBlocks';
 import { recoverRuntimeText, sharedChrome } from './recoverText';
 import { detectAuthoringTool } from './detectTool';
+import { testEncryption } from '@/scorm/edit/lectoraTestCrypto';
+import { embeddedPages, lectoraCourseOrder, lectoraSections } from '@/scorm/export/lectoraEdit';
 import { dirname, join, IMAGE_RE, HTML_RE } from './paths';
 import type { Course, Slide } from '@/types/course';
 
@@ -79,6 +81,12 @@ export async function importScorm(file: File, onProgress?: ProgressFn): Promise<
     if (IMAGE_RE.test(path)) imageFiles.push(path);
   });
   const authoringTool = detectAuthoringTool(manifestXml, allPaths);
+  // Lectora pages are all real, navigable pages (Next buttons chain through every
+  // one), so each must be a slide — even one whose only text is shared player
+  // chrome (e.g. a video page). A page hidden from the editor can't be deleted,
+  // yet an export that removes its neighbours will re-route navigation onto it.
+  const everyPageIsASlide = authoringTool === 'Lectora';
+  const encryption = authoringTool === 'Lectora' ? await testEncryption(zip) : undefined; // only Lectora is checked
 
   // 3) Map items → slides
   report(2);
@@ -164,7 +172,7 @@ export async function importScorm(file: File, onProgress?: ProgressFn): Promise<
       for (const dep of r.dependencies) walk(dep);
     };
     walk(rootId);
-    return out.slice(0, 300); // backstop against pathological packages
+    return out.slice(0, 5000); // backstop against pathological packages (real courses reach ~600 pages)
   };
 
   const prettyName = (path: string): string => {
@@ -241,7 +249,7 @@ export async function importScorm(file: File, onProgress?: ProgressFn): Promise<
         }
         const name = pageName(p);
         const runs = runtimeRuns[i].filter((r) => !chrome.has(r) && r !== name);
-        if (runs.length) built.push(recoveredSlide(name, runs, p.path));
+        if (runs.length || everyPageIsASlide) built.push(recoveredSlide(name, runs, p.path));
       });
 
       if (built.length) slides.push(...built);
@@ -265,6 +273,32 @@ export async function importScorm(file: File, onProgress?: ProgressFn): Promise<
       // Asset/cluster with no launchable HTML — keep a minimal editable heading.
       slides.push(headingSlide(item.title));
     }
+  }
+
+  // Lectora: slides in course order (the manifest lists pages alphabetically), and
+  // not the panel pages every slide embeds (the table of contents) — they aren't
+  // slides, and deleting one broke every remaining page.
+  if (everyPageIsASlide) {
+    const pages = new Map<string, string>();
+    for (const p of allPaths.filter((q) => HTML_RE.test(q))) pages.set(p, (await readFile(p)) ?? '');
+    const embedded = new Set([...pages].flatMap(([p, h]) => embeddedPages(p, h)));
+    const rank = new Map(lectoraCourseOrder(pages, courseLaunchHref).map((p, i) => [p, i]));
+    const at = (sl: Slide) => (sl.sourceHref ? (rank.get(sl.sourceHref) ?? rank.size) : rank.size);
+    const kept = slides.filter((sl) => !sl.sourceHref || !embedded.has(sl.sourceHref));
+    kept.sort((a, b) => at(a) - at(b)); // stable: unranked keep manifest order
+    // sections from the table of contents; each section's slides kept together,
+    // sections in the order the course reaches them
+    const sections = lectoraSections(pages);
+    for (const sl of kept) {
+      const sec = sl.sourceHref ? sections.get(sl.sourceHref) : undefined;
+      if (sec) sl.section = sec;
+    }
+    if (sections.size) {
+      const firstSeen = new Map<string, number>();
+      kept.forEach((sl, i) => firstSeen.has(sl.section ?? '') || firstSeen.set(sl.section ?? '', i));
+      kept.sort((a, b) => firstSeen.get(a.section ?? '')! - firstSeen.get(b.section ?? '')!);
+    }
+    slides.splice(0, slides.length, ...kept);
   }
 
   // 4) finish media extraction (any remaining unreferenced images are left lazy)
@@ -292,6 +326,7 @@ export async function importScorm(file: File, onProgress?: ProgressFn): Promise<
       allowReview: true,
       description: '',
       ...(authoringTool ? { authoringTool } : {}),
+      ...(encryption ? { encryption } : {}),
     },
     slides,
   };

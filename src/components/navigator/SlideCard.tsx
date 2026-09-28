@@ -8,13 +8,18 @@ interface Props {
   slide: Slide;
   index: number;
   selected: boolean;
+  /** ticked for bulk actions */
+  checked: boolean;
+  /** some slide is ticked (checkboxes stay visible) */
+  multi: boolean;
   dropBefore: boolean;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, e: React.MouseEvent) => void;
+  onToggle: (id: string, e: React.MouseEvent) => void;
   onDelete: (id: string) => void;
   onDuplicate: (id: string) => void;
 }
 
-export function SlideCard({ slide, index, selected, dropBefore, onSelect, onDelete, onDuplicate }: Props) {
+export function SlideCard({ slide, index, selected, checked, multi, dropBefore, onSelect, onToggle, onDelete, onDuplicate }: Props) {
   const meta = TYPE_META[slide.type];
   const st = STATUS_META[slide.status];
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: slide.id });
@@ -23,7 +28,8 @@ export function SlideCard({ slide, index, selected, dropBefore, onSelect, onDele
     <div
       ref={setNodeRef}
       className="slide-card"
-      onClick={() => onSelect(slide.id)}
+      data-slide-id={slide.id}
+      onClick={(e) => onSelect(slide.id, e)}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
@@ -33,8 +39,8 @@ export function SlideCard({ slide, index, selected, dropBefore, onSelect, onDele
         padding: '10px 10px 10px 8px',
         borderRadius: 'var(--r-md)',
         cursor: 'pointer',
-        border: '1.5px solid ' + (selected ? 'var(--accent)' : 'transparent'),
-        background: selected ? 'var(--surface)' : 'transparent',
+        border: '1.5px solid ' + (selected || checked ? 'var(--accent)' : 'transparent'),
+        background: checked ? 'var(--accent-soft)' : selected ? 'var(--surface)' : 'transparent',
         boxShadow: selected ? 'var(--sh-sm)' : 'none',
         opacity: isDragging ? 0.4 : 1,
         outline: dropBefore ? '2px solid var(--accent)' : 'none',
@@ -42,10 +48,10 @@ export function SlideCard({ slide, index, selected, dropBefore, onSelect, onDele
         zIndex: isDragging ? 1 : undefined,
       }}
       onMouseEnter={(e) => {
-        if (!selected) e.currentTarget.style.background = 'var(--surface-2)';
+        if (!selected && !checked) e.currentTarget.style.background = 'var(--surface-2)';
       }}
       onMouseLeave={(e) => {
-        if (!selected) e.currentTarget.style.background = 'transparent';
+        if (!selected && !checked) e.currentTarget.style.background = 'transparent';
       }}
     >
       {/* drag handle + number */}
@@ -60,9 +66,21 @@ export function SlideCard({ slide, index, selected, dropBefore, onSelect, onDele
           {String(index + 1).padStart(2, '0')}
         </span>
       </div>
-      {/* thumbnail */}
-      <div style={{ flexShrink: 0, width: 46, height: 34, borderRadius: 8, background: meta.soft, color: meta.color, display: 'grid', placeItems: 'center' }}>
+      {/* thumbnail, with the multi-select checkbox on its corner */}
+      <div style={{ position: 'relative', flexShrink: 0, width: 46, height: 34, borderRadius: 8, background: meta.soft, color: meta.color, display: 'grid', placeItems: 'center' }}>
         <Icon name={slide.type} size={19} />
+        <button
+          role="checkbox"
+          aria-checked={checked}
+          aria-label={`Select ${slide.name}`}
+          className={'slide-check' + (multi ? ' show' : '') + (checked ? ' on' : '')}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle(slide.id, e);
+          }}
+        >
+          {checked && <Icon name="check" size={11} />}
+        </button>
       </div>
       {/* text */}
       <div style={{ minWidth: 0, flex: 1 }}>
@@ -92,7 +110,7 @@ export function SlideCard({ slide, index, selected, dropBefore, onSelect, onDele
         </button>
         <button
           className="mini-act tip"
-          data-tip="Delete"
+          data-tip={checked ? 'Delete selected' : 'Delete'}
           onClick={(e) => {
             e.stopPropagation();
             onDelete(slide.id);

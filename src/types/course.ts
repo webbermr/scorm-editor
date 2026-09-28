@@ -124,7 +124,18 @@ export interface Scenario {
 
 /** A text change to a runtime-rendered element, keyed by its source element id
  *  (e.g. "text236596"). `from` is the original visible text; `to` is the new. */
-export interface SourceTextEdit {
+/** What a text edit does to the clickable objects laid over that text (e.g. the
+ *  invisible hotspot buttons on "Home | Resources | SAVE & EXIT"). */
+export interface OverlayChanges {
+  /** overlays whose words were deleted — switched off so a deleted link doesn't
+   *  stay live over empty space */
+  hideObjects?: string[];
+  /** overlays whose words moved (text before them was deleted or changed) — shifted
+   *  by dx/dy page px from their original position so they stay on their words */
+  moveObjects?: Record<string, { dx: number; dy: number }>;
+}
+
+export interface SourceTextEdit extends OverlayChanges {
   elementId: string;
   from: string;
   to: string;
@@ -145,6 +156,8 @@ export interface Slide {
   rawImported?: boolean;
   /** package-relative path of the original imported page (for the "View Original" iframe) */
   sourceHref?: string;
+  /** course section ("chapter") the slide belongs to, from the course's table of contents */
+  section?: string;
 }
 
 // ---- Course meta + root ----
@@ -165,6 +178,10 @@ export interface CourseMeta {
   description: string;
   /** authoring tool detected on import (e.g. "Lectora"), if recognized */
   authoringTool?: string;
+  /** Lectora test definition encryption, detected on import: 'none' (plain or no
+   *  test), 'unlocked' (encrypted, decrypted with the course's own player key) or
+   *  'locked' (encrypted, couldn't be decrypted — its questions can't be edited) */
+  encryption?: 'none' | 'unlocked' | 'locked';
 }
 
 export interface Course {
